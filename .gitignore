@@ -1,0 +1,25 @@
+# Raw and processed data — never committed to git (too large, use DVC instead)
+data/raw/
+data/processed/
+data/versioned/
+data/exports/
+
+# Python environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# DVC internal cache (the .dvc/ metadata folder IS committed — just not the cache)
+.dvc/cache/
+.dvc/tmp/
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Mac junk
+.DS_Store
+
+# W&B run artifacts
+wandb/
