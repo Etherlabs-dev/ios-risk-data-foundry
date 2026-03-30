@@ -3,6 +3,8 @@ import pandas as pd
 import sys
 from pathlib import Path
 from foundry.formatters import df_to_instruction_pairs
+from foundry.sources.sec_edgar import chunk_text
+
 
 
 # This line tells Python where to find our foundry package
@@ -102,3 +104,28 @@ def test_formatter_output(sample_df):
         assert pair["output"] in valid_labels, (
             f"Unexpected label: {pair['output']}"
         )
+
+
+def test_chunk_text():
+    """
+    chunk_text must:
+    1. Split text into chunks of the right word count
+    2. Create overlap between consecutive chunks
+    3. Return empty list for empty input
+    """
+    # Build a predictable 20-word string
+    words = [f"word{i}" for i in range(20)]
+    text  = " ".join(words)
+
+    # chunk_size=10, overlap=2 → step=8
+    chunks = chunk_text(text, chunk_size=10, overlap=2)
+
+    # First chunk: words 0-9
+    assert chunks[0] == " ".join(words[0:10])
+
+    # Second chunk: words 8-17 — words 8,9 are the overlap
+    assert chunks[1] == " ".join(words[8:18])
+
+    # Empty input returns empty list
+    assert chunk_text("") == []
+    assert chunk_text("   ") == []
