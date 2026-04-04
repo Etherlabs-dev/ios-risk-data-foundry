@@ -4,7 +4,7 @@
 sources:
   fraud_transactions:
     raw_path: data/raw/creditcard.csv
-    output_path: data/processed/fraud_engineered.jsonl
+    output_path: data/exports/ios_risk_finetune_v1.jsonl
 
   sec_edgar:
     output_path: data/processed/edgar_risk_chunks.jsonl
