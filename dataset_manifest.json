@@ -1,0 +1,27 @@
+{
+  "version": "foundry-v1.0",
+  "created_at": "2026-04-04T14:58:57.318906Z",
+  "files": {
+    "data/exports/ios_risk_finetune_v1.jsonl": {
+      "records": 276772,
+      "size_mb": 70.53,
+      "sha256": "ae50574451b88cdad1b8977eca9a49855e70210b45b4bd2fb86fe9d39a0f5338",
+      "status": "ok"
+    },
+    "data/processed/synthetic_transactions.jsonl": {
+      "records": 10000,
+      "size_mb": 2.524,
+      "sha256": "450c36c2444ecce772b65447635dc090b440e7b29237fcf7c6a740a09df2139d",
+      "status": "ok"
+    },
+    "data/processed/synthetic_scenario_pairs.jsonl": {
+      "records": 10000,
+      "size_mb": 4.473,
+      "sha256": "b16955ff8f2822632f350d50c086058afd4c471a49fe5092501e9015437a5553",
+      "status": "ok"
+    },
+    "data/processed/edgar_risk_chunks.jsonl": {
+      "status": "missing"
+    }
+  }
+}
