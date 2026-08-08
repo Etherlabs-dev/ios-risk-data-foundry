@@ -28,7 +28,9 @@ Public transaction data      SEC EDGAR text       Synthetic risk scenarios
 
 ### `foundry/pipeline.py`
 
-The current primary entry point for the tabular path. It loads configuration, reads the raw credit-card dataset, runs feature engineering, formats instruction pairs, and exports JSONL.
+The config-driven entry point for enabled sources. It keeps SEC network access opt-in,
+loads the raw transaction dataset only when required, invokes each enabled source processor,
+and passes only those source outputs to the deterministic merger.
 
 ### `foundry/features/`
 
@@ -80,8 +82,15 @@ Every final record should be traceable to a source class: public transaction dat
 
 The architecture is designed for experimentation and reproducible evidence. Deployment claims require a separate production system, target data, access controls, and online monitoring.
 
-## Current architectural gap
+## Multi-source orchestration boundary
 
-The repository contains three source paths, but the primary `foundry.pipeline` entry point currently orchestrates the tabular transaction path only. SEC and synthetic utilities exist separately. A later engineering pass should expose a single configurable orchestration layer for all enabled sources and add integration tests around that full multi-source run.
+The repository now has a small orchestration layer for the tabular, SEC, and statistical
+synthetic paths. Each source is enabled independently in `configs/pipeline_config.yaml`.
+The default remains tabular-only so a normal run does not unexpectedly make network requests
+or mix synthetic examples into an export. The merger receives the enabled source names, which
+prevents stale output from a disabled source from leaking into a new dataset.
 
-This gap is documented deliberately rather than hidden behind the higher-level architecture diagram.
+The rule-based `synthetic_generator.py` scenario factory remains an explicit standalone artifact.
+It emits explanatory scenarios rather than the same statistical source contract, so forcing it
+into the main pipeline would obscure that evidence boundary. A future extension can add it as a
+fourth named source once its distinct provenance is represented in each output record.

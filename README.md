@@ -19,8 +19,8 @@ It is designed to answer a specific engineering question:
 
 | Claim | Evidence type | Current evidence |
 |---|---|---|
-| Feature engineering improves fraud-detection recall | **Benchmarked** | Recall `0.7857 → 0.8367` on the documented validation run |
-| Engineered features improve average precision vs. the base feature set | **Benchmarked** | `0.8510 → 0.8623` (+0.0114) |
+| Feature engineering improves fraud-detection recall | **Benchmarked** | Recall `0.7857 → 0.8367` on the reproduced validation run |
+| Engineered features improve average precision vs. the base feature set | **Benchmarked** | `0.8510 → 0.8588` (+0.0079) |
 | Pipeline produces training-ready instruction pairs | **Implemented / tested** | Formatter + pipeline code with pytest coverage |
 | Dataset outputs are versionable and fingerprinted | **Implemented** | DVC configuration + SHA256 dataset manifest |
 | Domain dataset is published for reuse | **Published artifact** | Hugging Face dataset: `Etherlabs/ios-risk-finetune-v1` |
@@ -97,7 +97,7 @@ A more detailed engineering view is in [`docs/architecture.md`](docs/architectur
 
 The tabular path uses the public credit-card fraud dataset containing **284,807 transactions**. The pipeline adds domain-oriented features such as:
 
-- transaction velocity (`txn_count_1h`, `txn_count_24h`)
+- trailing dataset-density proxies (`txn_count_1h`, `txn_count_24h`)
 - amount anomaly (`amount_zscore`)
 - round-amount detection
 - micro-transaction detection
@@ -126,13 +126,18 @@ A documented validation run compared the base feature set with the engineered fe
 
 | Metric | Base | Engineered | Delta |
 |---|---:|---:|---:|
-| Average precision | 0.8510 | **0.8623** | **+0.0114** |
-| ROC AUC | **0.9747** | 0.9743 | -0.0004 |
-| F1 | 0.8415 | **0.8542** | **+0.0126** |
-| Precision | **0.9059** | 0.8723 | -0.0335 |
+| Average precision | 0.8510 | **0.8588** | **+0.0079** |
+| ROC AUC | 0.9747 | **0.9803** | **+0.0055** |
+| F1 | 0.8415 | **0.8586** | **+0.0171** |
+| Precision | **0.9059** | 0.8817 | -0.0242 |
 | Recall | 0.7857 | **0.8367** | **+0.0510** |
 
 The important trade-off is explicit: recall improved while precision declined. In a fraud-risk context, whether that trade-off is acceptable depends on the operational cost of false positives versus missed fraud. This repository does **not** treat a single metric increase as proof of production superiority.
+
+These figures were independently rerun on 2026-08-08 with the public Kaggle dataset,
+the sibling evaluation harness at commit `5144f8c`, and the pinned validation dependencies.
+See [`docs/benchmark-reproduction.md`](docs/benchmark-reproduction.md) for dataset fingerprints,
+commands, environment, and methodological limitations.
 
 ---
 
@@ -209,6 +214,7 @@ python -m pytest tests/ -v
 Clone `eval-harness` alongside this repository and run:
 
 ```bash
+pip install -r requirements-validation.txt
 PYTHONPATH=../eval-harness/ios-risk-eval-harness:. python scripts/validate_features.py
 ```
 
@@ -229,7 +235,9 @@ The default container command runs the unit tests. Running the full data pipelin
 
 ## CI
 
-GitHub Actions runs the unit test suite on pushes and pull requests. The CI workflow intentionally avoids external dataset downloads and SEC network calls so the baseline test job remains deterministic.
+GitHub Actions runs Ruff lint/format checks, the unit test suite, and a Docker image build plus
+the container test command on pushes and pull requests. CI intentionally avoids external dataset
+downloads and SEC network calls so the required jobs remain deterministic.
 
 ---
 

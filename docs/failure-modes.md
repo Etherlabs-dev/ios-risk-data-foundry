@@ -86,6 +86,11 @@ This document records the main ways a domain-data pipeline like IOS Risk Data Fo
 - keep experiment logs;
 - minimize repeated decisions using the final test split.
 
+The current feature-validation script is exploratory: it chooses the F1 threshold on the test split
+and derives some unsupervised statistics before splitting. A production-grade benchmark should add
+a validation split, fit preprocessing on training data only, freeze the threshold, and report the
+test split once.
+
 ### Metric selection bias
 
 **Risk:** one improved metric is presented as overall system improvement while another degrades.

@@ -10,18 +10,17 @@ WHY THIS SOURCE EXISTS:
   lawyers and risk officers actually describe fraud, AML failures,
   credit defaults and operational risk events.
 """
+
 import json
 import time
-import requests
 from pathlib import Path
+
+import requests
 from bs4 import BeautifulSoup
 
-
 EDGAR_SEARCH_URL = "https://efts.sec.gov/LATEST/search-index"
-EDGAR_BASE_URL   = "https://www.sec.gov"
-HEADERS = {
-    "User-Agent": "IOS-Risk-DataFoundry research@etherlabs.dev"
-}
+EDGAR_BASE_URL = "https://www.sec.gov"
+HEADERS = {"User-Agent": "IOS-Risk-DataFoundry research@etherlabs.dev"}
 
 
 def fetch_filing_urls(query: str, limit: int = 10) -> list[str]:
@@ -33,7 +32,7 @@ def fetch_filing_urls(query: str, limit: int = 10) -> list[str]:
     CIK in _source.ciks[0] — we combine these to build the direct URL.
     """
     params = {
-        "q":     query,
+        "q": query,
         "forms": "10-K",
     }
 
@@ -58,14 +57,18 @@ def fetch_filing_urls(query: str, limit: int = 10) -> list[str]:
             continue
 
         accession, filename = hit_id.split(":", 1)
-        accession_nodashes  = accession.replace("-", "")
+        accession_nodashes = accession.replace("-", "")
 
         ciks = source.get("ciks", [])
         if not ciks:
             continue
 
-        # CIK arrives with leading zeros ("0000310522") — strip for URL
-        cik = str(int(ciks[0]))
+        # CIK arrives with leading zeros ("0000310522") — strip for URL.
+        # Ignore malformed search hits instead of aborting the full query.
+        try:
+            cik = str(int(ciks[0]))
+        except (TypeError, ValueError):
+            continue
 
         url = f"{EDGAR_BASE_URL}/Archives/edgar/data/{cik}/{accession_nodashes}/{filename}"
         urls.append(url)
@@ -105,16 +108,22 @@ def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]
     overlap:    number of words shared between consecutive chunks
                 so meaning at chunk boundaries is never lost
     """
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than zero")
+    if overlap < 0 or overlap >= chunk_size:
+        raise ValueError("overlap must be non-negative and smaller than chunk_size")
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
     if not text.strip():
         return []
 
-    words  = text.split()
+    words = text.split()
     chunks = []
-    step   = chunk_size - overlap   # how far to advance each iteration
-    start  = 0
+    step = chunk_size - overlap  # how far to advance each iteration
+    start = 0
 
     while start < len(words):
-        end   = start + chunk_size
+        end = start + chunk_size
         chunk = " ".join(words[start:end])
         chunks.append(chunk)
         start += step
@@ -127,16 +136,16 @@ def process_edgar_source(config: dict) -> None:
     Full EDGAR pipeline: search → fetch → chunk → format → export.
     Reads all parameters from the config dict passed in.
     """
-    edgar_cfg     = config['sources']['sec_edgar']
-    queries       = edgar_cfg['queries']
-    limit         = edgar_cfg['limit_per_query']
-    chunk_size    = edgar_cfg['chunk_size']
-    chunk_overlap = edgar_cfg['chunk_overlap']
-    output_path   = edgar_cfg['output_path']
+    edgar_cfg = config["sources"]["sec_edgar"]
+    queries = edgar_cfg["queries"]
+    limit = edgar_cfg["limit_per_query"]
+    chunk_size = edgar_cfg["chunk_size"]
+    chunk_overlap = edgar_cfg["chunk_overlap"]
+    output_path = edgar_cfg["output_path"]
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    all_pairs  = []
+    all_pairs = []
     total_docs = 0
 
     for query in queries:
@@ -153,9 +162,15 @@ def process_edgar_source(config: dict) -> None:
 
             for chunk in chunks:
                 pair = {
-                    "instruction": "Identify the financial risk factors described in this regulatory filing excerpt.",
-                    "input":       chunk,
-                    "output":      f"This excerpt from a 10-K filing discusses risk factors related to: {query}.",
+                    "instruction": (
+                        "Identify the financial risk factors described in this regulatory filing "
+                        "excerpt."
+                    ),
+                    "input": chunk,
+                    "output": (
+                        "This excerpt from a 10-K filing discusses risk factors related to: "
+                        f"{query}."
+                    ),
                 }
                 all_pairs.append(pair)
 
@@ -163,11 +178,11 @@ def process_edgar_source(config: dict) -> None:
         time.sleep(1)
 
     # Export to JSONL
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         for pair in all_pairs:
-            f.write(json.dumps(pair) + '\n')
+            f.write(json.dumps(pair) + "\n")
 
-    print(f"\n✓ EDGAR pipeline complete")
+    print("\n✓ EDGAR pipeline complete")
     print(f"  Queries processed : {len(queries)}")
     print(f"  Documents fetched : {total_docs}")
     print(f"  Chunks generated  : {len(all_pairs)}")

@@ -1,6 +1,19 @@
-import pandas as pd
 import json
 from pathlib import Path
+
+import pandas as pd
+
+FORMATTER_COLUMNS = {
+    "Amount",
+    "Class",
+    "amount_zscore",
+    "hour_of_day",
+    "is_large_txn",
+    "is_micro_txn",
+    "is_off_hours",
+    "is_round_amount",
+    "txn_count_1h",
+}
 
 
 def row_to_instruction_pair(row: pd.Series) -> dict:
@@ -10,7 +23,15 @@ def row_to_instruction_pair(row: pd.Series) -> dict:
     The Alpaca format (instruction / input / output) is the standard
     format for fine-tuning open-source LLMs like LLaMA and Mistral.
     """
-    label = "FRAUD" if row['Class'] == 1 else "LEGITIMATE"
+    missing = FORMATTER_COLUMNS.difference(row.index)
+    if missing:
+        raise ValueError(f"Cannot format row; missing columns: {', '.join(sorted(missing))}")
+    if row[list(FORMATTER_COLUMNS)].isnull().any():
+        raise ValueError("Cannot format row with missing values")
+    if row["Class"] not in {0, 1}:
+        raise ValueError("Class must be either 0 (legitimate) or 1 (fraud)")
+
+    label = "FRAUD" if row["Class"] == 1 else "LEGITIMATE"
 
     input_text = (
         f"Amount: ${row['Amount']:.2f} | "
@@ -24,10 +45,14 @@ def row_to_instruction_pair(row: pd.Series) -> dict:
     )
 
     return {
-        "instruction": "Classify this financial transaction as FRAUD or LEGITIMATE based on the features provided.",
+        "instruction": (
+            "Classify this financial transaction as FRAUD or LEGITIMATE based on the "
+            "features provided."
+        ),
         "input": input_text,
         "output": label,
     }
+
 
 def df_to_instruction_pairs(df: pd.DataFrame) -> list[dict]:
     """
@@ -47,8 +72,8 @@ def export_to_jsonl(pairs: list[dict], output_path: str) -> None:
     """
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_path, 'w') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         for pair in pairs:
-            f.write(json.dumps(pair) + '\n')
+            f.write(json.dumps(pair) + "\n")
 
     print(f"Exported {len(pairs)} records to {output_path}")

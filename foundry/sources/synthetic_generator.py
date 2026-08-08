@@ -10,11 +10,12 @@ WHY THIS IS DIFFERENT FROM synthetic.py:
   a risk_explanation field — teaching the LLM to reason about fraud,
   not just classify it.
 """
+
 import json
 import random
-import numpy as np
-import pandas as pd
 from pathlib import Path
+
+import numpy as np
 
 
 class FraudScenarioFactory:
@@ -26,16 +27,15 @@ class FraudScenarioFactory:
 
     # Fraud types and their risk levels
     FRAUD_TYPES = {
-        "card_testing":      "HIGH",
-        "account_takeover":  "CRITICAL",
-        "money_mule":        "HIGH",
-        "bust_out":          "CRITICAL",
+        "card_testing": "HIGH",
+        "account_takeover": "CRITICAL",
+        "money_mule": "HIGH",
+        "bust_out": "CRITICAL",
     }
 
     def __init__(self, seed: int = 42):
-        self.rng    = np.random.default_rng(seed)
+        self.rng = np.random.default_rng(seed)
         self.random = random.Random(seed)
-
 
     def generate_card_testing(self) -> dict:
         """
@@ -44,14 +44,13 @@ class FraudScenarioFactory:
         before escalating to large purchases.
         """
         txn_count = int(self.rng.integers(5, 30))
-        amount    = round(float(self.rng.uniform(0.01, 2.00)), 2)
-        hour      = int(self.rng.integers(0, 23))
-        time_sec  = hour * 3600 + int(self.rng.integers(0, 3600))
+        amount = round(float(self.rng.uniform(0.01, 2.00)), 2)
+        hour = int(self.rng.integers(0, 23))
+        time_sec = hour * 3600 + int(self.rng.integers(0, 3600))
 
         # V1-V28: card testing shows anomalous PCA patterns
         v_features = {
-            f"V{i}": round(float(self.rng.normal(loc=-1.5, scale=1.2)), 4)
-            for i in range(1, 29)
+            f"V{i}": round(float(self.rng.normal(loc=-1.5, scale=1.2)), 4) for i in range(1, 29)
         }
 
         explanation = (
@@ -64,15 +63,14 @@ class FraudScenarioFactory:
 
         return {
             **v_features,
-            "Time":           time_sec,
-            "Amount":         amount,
-            "Class":          1,
-            "fraud_type":     "card_testing",
-            "risk_level":     "HIGH",
-            "txn_count_1h":   txn_count,
+            "Time": time_sec,
+            "Amount": amount,
+            "Class": 1,
+            "fraud_type": "card_testing",
+            "risk_level": "HIGH",
+            "txn_count_1h": txn_count,
             "risk_explanation": explanation,
         }
-
 
     def generate_account_takeover(self) -> dict:
         """
@@ -81,17 +79,16 @@ class FraudScenarioFactory:
         high-value purchases before the victim notices.
         """
         txn_count = int(self.rng.integers(1, 5))
-        amount    = round(float(self.rng.uniform(200.00, 2000.00)), 2)
+        amount = round(float(self.rng.uniform(200.00, 2000.00)), 2)
 
         # Heavily skewed to off-hours — victims are asleep
         off_hours = list(range(0, 7)) + [23]
-        hour      = int(self.random.choice(off_hours))
-        time_sec  = hour * 3600 + int(self.rng.integers(0, 3600))
+        hour = int(self.random.choice(off_hours))
+        time_sec = hour * 3600 + int(self.rng.integers(0, 3600))
 
         # V features: account takeover has distinct PCA signature
         v_features = {
-            f"V{i}": round(float(self.rng.normal(loc=-2.5, scale=1.5)), 4)
-            for i in range(1, 29)
+            f"V{i}": round(float(self.rng.normal(loc=-2.5, scale=1.5)), 4) for i in range(1, 29)
         }
 
         explanation = (
@@ -105,15 +102,14 @@ class FraudScenarioFactory:
 
         return {
             **v_features,
-            "Time":             time_sec,
-            "Amount":           amount,
-            "Class":            1,
-            "fraud_type":       "account_takeover",
-            "risk_level":       "CRITICAL",
-            "txn_count_1h":     txn_count,
+            "Time": time_sec,
+            "Amount": amount,
+            "Class": 1,
+            "fraud_type": "account_takeover",
+            "risk_level": "CRITICAL",
+            "txn_count_1h": txn_count,
             "risk_explanation": explanation,
         }
-
 
     def generate_money_mule(self) -> dict:
         """
@@ -122,17 +118,16 @@ class FraudScenarioFactory:
         requirements ($10,000 threshold).
         """
         txn_count = int(self.rng.integers(2, 8))
-        hour      = int(self.rng.integers(0, 23))
-        time_sec  = hour * 3600 + int(self.rng.integers(0, 3600))
+        hour = int(self.rng.integers(0, 23))
+        time_sec = hour * 3600 + int(self.rng.integers(0, 3600))
 
         # Round numbers just under $10k — structuring pattern
-        base   = int(self.rng.integers(20, 99)) * 100   # $2,000–$9,900
+        base = int(self.rng.integers(20, 99)) * 100  # $2,000–$9,900
         amount = float(base)
 
         # V features: money mule has moderate anomaly signal
         v_features = {
-            f"V{i}": round(float(self.rng.normal(loc=-1.0, scale=1.0)), 4)
-            for i in range(1, 29)
+            f"V{i}": round(float(self.rng.normal(loc=-1.0, scale=1.0)), 4) for i in range(1, 29)
         }
 
         explanation = (
@@ -146,15 +141,14 @@ class FraudScenarioFactory:
 
         return {
             **v_features,
-            "Time":             time_sec,
-            "Amount":           amount,
-            "Class":            1,
-            "fraud_type":       "money_mule",
-            "risk_level":       "HIGH",
-            "txn_count_1h":     txn_count,
+            "Time": time_sec,
+            "Amount": amount,
+            "Class": 1,
+            "fraud_type": "money_mule",
+            "risk_level": "HIGH",
+            "txn_count_1h": txn_count,
             "risk_explanation": explanation,
         }
-
 
     def generate_bust_out(self) -> dict:
         """
@@ -163,14 +157,13 @@ class FraudScenarioFactory:
         lines and disappears.
         """
         txn_count = int(self.rng.integers(10, 50))
-        amount    = round(float(self.rng.uniform(500.00, 5000.00)), 2)
-        hour      = int(self.rng.integers(0, 23))
-        time_sec  = hour * 3600 + int(self.rng.integers(0, 3600))
+        amount = round(float(self.rng.uniform(500.00, 5000.00)), 2)
+        hour = int(self.rng.integers(0, 23))
+        time_sec = hour * 3600 + int(self.rng.integers(0, 3600))
 
         # V features: bust-out has the most extreme anomaly signal
         v_features = {
-            f"V{i}": round(float(self.rng.normal(loc=-3.0, scale=2.0)), 4)
-            for i in range(1, 29)
+            f"V{i}": round(float(self.rng.normal(loc=-3.0, scale=2.0)), 4) for i in range(1, 29)
         }
 
         explanation = (
@@ -184,43 +177,49 @@ class FraudScenarioFactory:
 
         return {
             **v_features,
-            "Time":             time_sec,
-            "Amount":           amount,
-            "Class":            1,
-            "fraud_type":       "bust_out",
-            "risk_level":       "CRITICAL",
-            "txn_count_1h":     txn_count,
+            "Time": time_sec,
+            "Amount": amount,
+            "Class": 1,
+            "fraud_type": "bust_out",
+            "risk_level": "CRITICAL",
+            "txn_count_1h": txn_count,
             "risk_explanation": explanation,
         }
-
 
 
 def build_synthetic_dataset(
     n_fraud: int = 2000,
     n_legit: int = 8000,
     output_path: str = "data/processed/synthetic_scenario_pairs.jsonl",
+    seed: int = 42,
 ) -> None:
     """
     Generate a balanced dataset of fraud scenarios and legitimate
     transactions, formatted as instruction pairs with risk explanations.
     """
-    factory   = FraudScenarioFactory(seed=42)
+    if n_fraud < 0 or n_legit < 0:
+        raise ValueError("Synthetic record counts must be non-negative")
+
+    factory = FraudScenarioFactory(seed=seed)
     fraud_types = list(FraudScenarioFactory.FRAUD_TYPES.keys())
-    per_type  = n_fraud // len(fraud_types)   # 500 per fraud type
+    per_type, remainder = divmod(n_fraud, len(fraud_types))
 
     generators = {
-        "card_testing":     factory.generate_card_testing,
+        "card_testing": factory.generate_card_testing,
         "account_takeover": factory.generate_account_takeover,
-        "money_mule":       factory.generate_money_mule,
-        "bust_out":         factory.generate_bust_out,
+        "money_mule": factory.generate_money_mule,
+        "bust_out": factory.generate_bust_out,
     }
 
     all_pairs = []
 
     # Generate fraud scenarios — equal split across all 4 types
     print(f"Generating {n_fraud:,} fraud scenarios ({per_type} per type)...")
-    for fraud_type, generator in generators.items():
-        for _ in range(per_type):
+    generated_by_type = {}
+    for index, (fraud_type, generator) in enumerate(generators.items()):
+        count = per_type + (1 if index < remainder else 0)
+        generated_by_type[fraud_type] = count
+        for _ in range(count):
             record = generator()
             pair = {
                 "instruction": (
@@ -240,10 +239,10 @@ def build_synthetic_dataset(
 
     # Generate legitimate transactions
     print(f"Generating {n_legit:,} legitimate transactions...")
-    rng = np.random.default_rng(seed=99)
+    rng = np.random.default_rng(seed=seed + 1)
     for _ in range(n_legit):
         amount = round(float(rng.lognormal(mean=3.5, sigma=1.2)), 2)
-        hour   = int(rng.integers(0, 23))
+        hour = int(rng.integers(0, 23))
         txn_count = int(rng.integers(1, 5))
         pair = {
             "instruction": (
@@ -267,14 +266,14 @@ def build_synthetic_dataset(
         all_pairs.append(pair)
 
     # Shuffle and export
-    random.Random(42).shuffle(all_pairs)
+    random.Random(seed).shuffle(all_pairs)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, 'w') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         for pair in all_pairs:
-            f.write(json.dumps(pair) + '\n')
+            f.write(json.dumps(pair) + "\n")
 
-    print(f"\n✓ Scenario dataset complete")
-    print(f"  Fraud scenarios : {n_fraud:,} ({per_type} × {len(fraud_types)} types)")
+    print("\n✓ Scenario dataset complete")
+    print(f"  Fraud scenarios : {n_fraud:,} ({generated_by_type})")
     print(f"  Legit records   : {n_legit:,}")
     print(f"  Total pairs     : {len(all_pairs):,}")
     print(f"  Output          : {output_path}")

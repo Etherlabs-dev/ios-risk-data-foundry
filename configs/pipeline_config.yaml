@@ -1,12 +1,17 @@
 # IOS Risk Data Foundry — Pipeline Configuration
 # All tunable parameters live here. Nothing hardcoded in source files.
 
+pipeline:
+  seed: 42
+
 sources:
   fraud_transactions:
+    enabled: true
     raw_path: data/raw/creditcard.csv
-    output_path: data/exports/ios_risk_finetune_v1.jsonl
+    output_path: data/processed/fraud_transaction_pairs.jsonl
 
   sec_edgar:
+    enabled: false  # opt in: this source performs live SEC network requests
     output_path: data/processed/edgar_risk_chunks.jsonl
     queries:
       - "fraud risk financial institution"
@@ -19,9 +24,11 @@ sources:
     chunk_overlap: 64
 
   synthetic:
+    enabled: false
     output_path: data/processed/synthetic_transactions.jsonl
     n_fraud: 2000
     n_legit: 8000
+    seed: 42
 
 exports:
   instruction_pairs_path: data/exports/ios_risk_finetune_v1.jsonl

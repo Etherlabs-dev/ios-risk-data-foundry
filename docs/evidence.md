@@ -18,16 +18,24 @@ This repository is part of a public engineering portfolio. Claims are separated 
 |---|---|---|
 | Feature engineering | Implemented + tested | `foundry/features/` and `tests/test_features.py` |
 | Instruction formatting | Implemented + tested | `foundry/formatters.py` and formatter tests |
-| SEC text preparation | Implemented + partially tested | `foundry/sources/sec_edgar.py`; chunking test |
-| Synthetic scenario generation | Implemented | `foundry/sources/synthetic*.py` |
-| Dataset versioning | Implemented | DVC config, `foundry/versioning.py`, `dataset_manifest.json` |
-| Feature uplift | Benchmarked | `scripts/validate_features.py` and documented comparison |
+| SEC text preparation | Implemented + tested offline | URL parsing, HTML extraction, chunking, and export tests use mocked responses |
+| Synthetic scenario generation | Implemented + tested | Explicit seeds, deterministic output, class/count validation |
+| Dataset merge/versioning | Implemented + tested | Deterministic deduplication, JSONL validation, SHA256 tests, manifest |
+| Multi-source orchestration | Implemented + tested | Enabled-source integration test; SEC remains opt-in |
+| Feature uplift | Benchmarked | Reproduced run documented in `docs/benchmark-reproduction.md` |
 | Hugging Face dataset | Published artifact | `Etherlabs/ios-risk-finetune-v1` |
 | Client financial impact | Not claimed | No verified production client outcome in this repo |
 
 ## Benchmark interpretation
 
-The documented validation run shows engineered features improved average precision, F1, and recall while reducing precision slightly. This is evidence of a measurable trade-off on the evaluation dataset, not proof that the feature set is optimal for every production fraud system.
+The reproduced validation run shows engineered features improved average precision, ROC AUC,
+F1, and recall while reducing precision. This is evidence of a measurable trade-off on one
+public dataset, not proof that the feature set is optimal for a production fraud system.
+
+The validation script currently selects its classification threshold on the same test split used
+for final metrics and computes some unsupervised feature statistics before splitting. The result is
+therefore an exploratory benchmark, not a clean final held-out estimate. This limitation is explicit
+in the reproduction record and remains technical debt.
 
 A production decision would require:
 
