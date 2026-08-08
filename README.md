@@ -1,238 +1,322 @@
-# IOS Risk — Data Foundry v1
+# IOS Risk Data Foundry
 
-**Project 02 of the IntelligenceOS (IOS) Build Roadmap**
-**Author: Ugo Chukwu · Etherlabs**
+> **Status: Validated Prototype + Reproducible Benchmark**  
+> Domain-data engineering pipeline for finance/risk model development. Uses public datasets, public regulatory filings, and synthetic scenarios. This repository is **not presented as a production client deployment**.
 
-> The manufacturing plant for IOS Risk intelligence. Takes raw data from three sources — transaction records, regulatory filings, and synthetic scenarios — and outputs clean, versioned, training-ready datasets for fine-tuning domain-specific financial risk models.
+![Python](https://img.shields.io/badge/Python-3.11+-blue)
+![Tests](https://img.shields.io/badge/tests-pytest-informational)
+![License](https://img.shields.io/badge/license-Apache--2.0-green)
 
----
+The Data Foundry is the data infrastructure layer of **IntelligenceOS**, a domain AI system for Finance & Risk. It prepares structured and unstructured financial-risk data for evaluation, model adaptation, and downstream fine-tuning experiments.
 
-## What This Is
+It is designed to answer a specific engineering question:
 
-The Data Foundry is the data infrastructure layer of [IntelligenceOS](https://github.com/Etherlabs-dev) — a domain-specific AI system for financial risk and fraud detection built from the ground up.
-
-This repository implements a complete data engineering pipeline that:
-
-- Ingests and feature-engineers the Kaggle Credit Card Fraud dataset (284k transactions)
-- Scrapes and chunks SEC EDGAR 10-K regulatory filings into training-ready text
-- Generates synthetic fraud scenarios with natural-language risk explanations
-- Formats everything as Alpaca-style instruction pairs for LLM fine-tuning
-- Exports to HuggingFace Hub as a versioned, reproducible dataset
-- Validates that engineered features measurably improve the XGBoost fraud detection baseline
-
-**The key result:** Engineered features improve `avg_precision` from `0.8510 → 0.8623` (+0.0114) and recall from `0.7857 → 0.8367` (+0.0510) over the base feature set.
+> **Can domain data be prepared, versioned, tested, and measured well enough that model improvements are reproducible rather than anecdotal?**
 
 ---
 
-## IntelligenceOS Build Roadmap Context
+## Evidence Summary
 
-| Project | Component | Status |
-|---------|-----------|--------|
-| Project 01 | Eval Harness — XGBoost baseline (0.869 avg_precision) | Complete |
-| **Project 02** | **Data Foundry v1 — this repo** | **Complete** |
-| Project 03 | Domain Intelligence Core — LLM fine-tuning | Upcoming |
-| Project 07 | RAG Knowledge System | Upcoming |
-| Project 09 | Telemetry Layer | Upcoming |
+| Claim | Evidence type | Current evidence |
+|---|---|---|
+| Feature engineering improves fraud-detection recall | **Benchmarked** | Recall `0.7857 → 0.8367` on the documented validation run |
+| Engineered features improve average precision vs. the base feature set | **Benchmarked** | `0.8510 → 0.8623` (+0.0114) |
+| Pipeline produces training-ready instruction pairs | **Implemented / tested** | Formatter + pipeline code with pytest coverage |
+| Dataset outputs are versionable and fingerprinted | **Implemented** | DVC configuration + SHA256 dataset manifest |
+| Domain dataset is published for reuse | **Published artifact** | Hugging Face dataset: `Etherlabs/ios-risk-finetune-v1` |
+| Production financial impact | **Not claimed** | No client revenue, loss-prevention, or production ROI claim is made here |
 
-Every dataset built here flows directly into Project 03's fine-tuning run.
-
----
-
-## The Three Data Sources
-
-### Source 1 — Tabular: Kaggle Credit Card Fraud
-284,807 real credit card transactions with 11 engineered fraud-signal features:
-
-| Feature | Signal |
-|---------|--------|
-| `txn_count_1h` / `txn_count_24h` | Velocity — card testing shows as burst activity |
-| `amount_zscore` | Statistical anomaly — how unusual is this amount |
-| `is_round_amount` | Structuring signal — round numbers near reporting thresholds |
-| `is_micro_txn` | Card testing — tiny amounts ($0.01–$1) to verify stolen cards |
-| `is_large_txn` | Account takeover — amounts above 95th percentile |
-| `hour_of_day` | Time encoding |
-| `is_off_hours` | Fraud peaks 11pm–6am (victims asleep, teams understaffed) |
-| `day_of_week` | Weekly pattern encoding |
-| `amount_rolling_mean` / `amount_vs_mean` | Bust-out pattern detection |
-
-### Source 2 — Text: SEC EDGAR 10-K Filings
-Regulatory risk language from public financial filings, fetched via the free SEC EDGAR full-text search API. Chunked into 512-word overlapping windows for LLM training.
-
-Queries: fraud risk, AML compliance, credit default, cybersecurity breach, operational risk.
-
-### Source 3 — Synthetic: Fraud Scenario Factory
-10,000 generated records across 4 explicit fraud types, each with a natural-language `risk_explanation` field — teaching the model to *reason* about fraud, not just classify it:
-
-| Fraud Type | Pattern | Risk Level |
-|------------|---------|------------|
-| Card Testing | 5–30 micro-transactions ($0.01–$2.00) in <1 hour | HIGH |
-| Account Takeover | 1–5 large purchases ($200–$2,000) at off-hours | CRITICAL |
-| Money Mule | Round amounts ($2k–$9.9k) just under BSA reporting threshold | HIGH |
-| Bust-Out | 10–50 large transactions ($500–$5,000) in sudden burst | CRITICAL |
+See [`docs/evidence.md`](docs/evidence.md) for the evidence policy and interpretation of these results.
 
 ---
 
-## Dataset
+## What the System Does
 
-The final merged dataset is published on HuggingFace:
+The repository contains three domain-data preparation paths:
 
-**[Etherlabs/ios-risk-finetune-v1](https://huggingface.co/datasets/Etherlabs/ios-risk-finetune-v1)**
+1. **Transaction data** — feature engineering over the public Kaggle credit-card fraud dataset.
+2. **Regulatory text** — SEC EDGAR 10-K retrieval and chunking for finance/risk language.
+3. **Synthetic risk scenarios** — controlled fraud scenarios with explicit risk labels and natural-language explanations.
 
-```python
-from datasets import load_dataset
-ds = load_dataset("Etherlabs/ios-risk-finetune-v1")
+The outputs are prepared for evaluation and model-adaptation work inside IntelligenceOS.
+
+### Current implemented components
+
+- Config-driven tabular ingestion pipeline
+- Financial/fraud feature engineering
+- Alpaca-style instruction formatting
+- SEC EDGAR text ingestion/chunking utilities
+- Synthetic fraud scenario generation
+- Dataset merge/deduplication utilities
+- SHA256 dataset manifest/versioning
+- Hugging Face upload tooling
+- Feature validation against the IOS Risk evaluation harness
+- Pytest unit tests for core feature and formatting behavior
+
+---
+
+## Architecture
+
+```text
+┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
+│ Public transaction   │   │ SEC EDGAR filings    │   │ Synthetic scenarios  │
+│ data                 │   │ public risk language │   │ controlled labels    │
+└──────────┬───────────┘   └──────────┬───────────┘   └──────────┬───────────┘
+           │                          │                          │
+           └──────────────┬───────────┴──────────────┬───────────┘
+                          │                          │
+                 ┌────────▼─────────┐       ┌────────▼─────────┐
+                 │ Cleaning /       │       │ Feature / text   │
+                 │ normalization    │       │ transformation   │
+                 └────────┬─────────┘       └────────┬─────────┘
+                          └────────────┬─────────────┘
+                                       │
+                              ┌────────▼────────┐
+                              │ Instruction     │
+                              │ pair formatting │
+                              └────────┬────────┘
+                                       │
+                         ┌─────────────▼─────────────┐
+                         │ Merge · dedupe · version │
+                         │ manifest / DVC           │
+                         └─────────────┬─────────────┘
+                                       │
+                      ┌────────────────▼────────────────┐
+                      │ Evaluation / model adaptation   │
+                      │ IntelligenceOS downstream work  │
+                      └─────────────────────────────────┘
 ```
 
-**Stats:**
-- 276,772 instruction pairs (after deduplication)
-- Alpaca format: `{instruction, input, output}`
-- Apache 2.0 license
+A more detailed engineering view is in [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
-## Repo Structure
+## Dataset Sources
 
-```
+### 1. Tabular — Kaggle Credit Card Fraud
+
+The tabular path uses the public credit-card fraud dataset containing **284,807 transactions**. The pipeline adds domain-oriented features such as:
+
+- transaction velocity (`txn_count_1h`, `txn_count_24h`)
+- amount anomaly (`amount_zscore`)
+- round-amount detection
+- micro-transaction detection
+- large-transaction detection
+- hour/day encodings
+- off-hours activity
+- rolling amount behavior
+
+The purpose is not to claim that these features are universally optimal. Their value is measured against the existing baseline and kept only when the evaluation evidence supports them.
+
+### 2. Unstructured — SEC EDGAR 10-K filings
+
+The repository includes utilities to retrieve and chunk public regulatory filings around finance/risk topics such as fraud, AML, credit default, cybersecurity, and operational risk.
+
+### 3. Synthetic — Fraud Scenario Factory
+
+Synthetic examples provide controlled coverage for fraud patterns that are useful for training/evaluation experiments, including card testing, account takeover, money-mule patterns, and bust-out behavior.
+
+Synthetic data is always treated as **synthetic evidence**, not as production transaction history.
+
+---
+
+## Reproducible Benchmark
+
+A documented validation run compared the base feature set with the engineered feature set using the IOS Risk evaluation harness.
+
+| Metric | Base | Engineered | Delta |
+|---|---:|---:|---:|
+| Average precision | 0.8510 | **0.8623** | **+0.0114** |
+| ROC AUC | **0.9747** | 0.9743 | -0.0004 |
+| F1 | 0.8415 | **0.8542** | **+0.0126** |
+| Precision | **0.9059** | 0.8723 | -0.0335 |
+| Recall | 0.7857 | **0.8367** | **+0.0510** |
+
+The important trade-off is explicit: recall improved while precision declined. In a fraud-risk context, whether that trade-off is acceptable depends on the operational cost of false positives versus missed fraud. This repository does **not** treat a single metric increase as proof of production superiority.
+
+---
+
+## Repository Structure
+
+```text
 ios-risk-data-foundry/
-│
-├── foundry/                         # Core pipeline code
-│   ├── pipeline.py                  # Main orchestrator — run this
-│   ├── formatters.py                # Converts rows to Alpaca instruction pairs
-│   ├── merger.py                    # Combines, deduplicates, shuffles all sources
-│   ├── uploader.py                  # HuggingFace Hub upload
-│   ├── versioning.py                # SHA256 manifest + dataset versioning
-│   ├── features/
-│   │   └── tabular_features.py      # 11 fraud-signal feature functions
-│   └── sources/
-│       ├── sec_edgar.py             # SEC EDGAR 10-K ingestion pipeline
-│       ├── synthetic.py             # Distribution-sampled synthetic transactions
-│       └── synthetic_generator.py  # FraudScenarioFactory — 4 fraud types
-│
-├── scripts/
-│   └── validate_features.py         # Eval harness validation (closes Project 1 loop)
-│
-├── tests/
-│   └── test_features.py             # 6 pytest tests — run before every commit
-│
+├── .github/workflows/        # CI checks
 ├── configs/
-│   └── pipeline_config.yaml         # All parameters in one place
-│
-├── data/                            # gitignored — tracked by DVC
-│   ├── raw/                         # creditcard.csv lands here
-│   ├── processed/                   # intermediate outputs
-│   ├── versioned/                   # DVC snapshots
-│   └── exports/                     # HuggingFace-ready JSONL
-│
-├── notebooks/                       # EDA notebooks (in progress)
-├── dataset_manifest.json            # SHA256 fingerprints of all output files
+│   └── pipeline_config.yaml
+├── docs/
+│   ├── architecture.md
+│   ├── evidence.md
+│   └── failure-modes.md
+├── foundry/
+│   ├── features/
+│   ├── sources/
+│   │   ├── sec_edgar.py
+│   │   ├── synthetic.py
+│   │   └── synthetic_generator.py
+│   ├── formatters.py
+│   ├── merger.py
+│   ├── pipeline.py
+│   ├── uploader.py
+│   └── versioning.py
+├── scripts/
+│   └── validate_features.py
+├── tests/
+│   └── test_features.py
+├── dataset_manifest.json
+├── Dockerfile
 ├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## Quickstart
+## Quick Start
+
+### 1. Clone and create an environment
 
 ```bash
-# 1. Clone and set up environment
 git clone https://github.com/Etherlabs-dev/ios-risk-data-foundry.git
 cd ios-risk-data-foundry
-python -m venv venv && source venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-
-# 2. Add your data (not committed to git — too large)
-mkdir -p data/raw
-# Place creditcard.csv from https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
-# into data/raw/creditcard.csv
-
-# 3. Run the full pipeline
-python -m foundry.pipeline
-
-# 4. Run tests
-python -m pytest tests/ -v
-
-# 5. Validate features against eval harness baseline
-# (requires ios-risk-eval-harness cloned alongside this repo)
-PYTHONPATH=../ios-risk-eval-harness:. python3 scripts/validate_features.py
 ```
 
----
+### 2. Add the public fraud dataset
 
-## Reproduce Dataset Version v1.0
+Place `creditcard.csv` in:
+
+```text
+data/raw/creditcard.csv
+```
+
+The raw dataset is intentionally not committed to Git.
+
+### 3. Run the tabular pipeline
 
 ```bash
-git checkout foundry-v1.0
 python -m foundry.pipeline
 ```
 
-The `dataset_manifest.json` contains SHA256 hashes of all output files — verify your reproduction matches the published dataset exactly.
+### 4. Run tests
 
----
-
-## Instruction Pair Format
-
-Each training record follows the Alpaca format:
-
-**Fraud classification (tabular source):**
-```json
-{
-  "instruction": "Classify this financial transaction as FRAUD or LEGITIMATE based on the features provided.",
-  "input": "Amount: $149.62 | Hour: 0 | OffHours: 1 | MicroTxn: 0 | RoundAmt: 0 | LargeTxn: 0 | AmtZscore: 0.245 | TxnCount1h: 3963",
-  "output": "LEGITIMATE"
-}
+```bash
+python -m pytest tests/ -v
 ```
 
-**Fraud scenario (synthetic generator):**
-```json
-{
-  "instruction": "You are IOS Risk, an AI system for financial risk assessment. Analyse the following transaction and assess its fraud risk.",
-  "input": "Amount: $1674.34 | TxnCount1h: 4 | Hour: 4 | FraudType: account_takeover | RiskLevel: CRITICAL",
-  "output": "CRITICAL RISK — ACCOUNT TAKEOVER DETECTED. Large transaction of $1,674.34 at 04:00 is inconsistent with normal account behaviour. Off-hours timing combined with unusually high amount suggests compromised credentials. Immediate account freeze recommended."
-}
-```
+### 5. Validate engineered features against the evaluation harness
 
-**Regulatory text (SEC EDGAR source):**
-```json
-{
-  "instruction": "Identify the financial risk factors described in this regulatory filing excerpt.",
-  "input": "The company faces material exposure to credit default risk...",
-  "output": "This excerpt from a 10-K filing discusses risk factors related to: credit default risk fintech."
-}
+Clone `eval-harness` alongside this repository and run:
+
+```bash
+PYTHONPATH=../eval-harness/ios-risk-eval-harness:. python scripts/validate_features.py
 ```
 
 ---
 
-## Eval Results
+## Docker
 
-Validation run comparing base features (V1-V28 + Amount) vs engineered features using XGBoost and the IOS Risk eval harness:
+The included Dockerfile provides a reproducible Python environment for tests and development checks.
 
-```
-=======================================================
-RESULTS COMPARISON
-=======================================================
-Metric                 Baseline       Base   Engineered
--------------------------------------------------------
-avg_precision             0.869     0.8510     0.8623  (+0.0114)
-roc_auc                       -     0.9747     0.9743  (-0.0004)
-f1                            -     0.8415     0.8542  (+0.0126)
-precision                     -     0.9059     0.8723  (-0.0335)
-recall                        -     0.7857     0.8367  (+0.0510)
-=======================================================
-✓ Engineered features IMPROVED avg_precision by +0.0114
+```bash
+docker build -t ios-risk-data-foundry .
+docker run --rm ios-risk-data-foundry
 ```
 
-Higher recall (+0.051) means the model catches more actual fraud — the right trade-off for a fraud detection system where missing fraud is more costly than a false alert.
+The default container command runs the unit tests. Running the full data pipeline still requires the external dataset to be mounted or provided separately.
+
+---
+
+## CI
+
+GitHub Actions runs the unit test suite on pushes and pull requests. The CI workflow intentionally avoids external dataset downloads and SEC network calls so the baseline test job remains deterministic.
+
+---
+
+## Reliability & Failure Modes
+
+The pipeline is intentionally explicit about where reproducibility can break:
+
+- upstream public-source availability
+- schema drift in source data
+- distribution shift between public/synthetic data and real production traffic
+- duplicate or malformed records
+- non-deterministic synthetic generation if seeds are not fixed
+- label leakage or class imbalance
+- model-selection bias from repeatedly optimizing against one validation set
+
+See [`docs/failure-modes.md`](docs/failure-modes.md) for the mitigation checklist.
+
+---
+
+## Data Governance & Security
+
+This repository uses public datasets, public filings, and generated synthetic records. It does not require client PII.
+
+For production adaptation, the design should be extended with:
+
+- explicit data provenance and consent/permission records
+- PII classification and minimization
+- encryption at rest/in transit
+- access controls and least privilege
+- dataset retention/deletion policy
+- reproducible train/validation/test splits
+- model and dataset lineage
+- audit logs for data transformations
+
+These controls are part of the production standard for IntelligenceOS but should not be inferred as implemented here unless they are present in code/configuration.
+
+---
+
+## Published Dataset
+
+The current dataset artifact is published on Hugging Face as:
+
+**`Etherlabs/ios-risk-finetune-v1`**
+
+Example:
+
+```python
+from datasets import load_dataset
+
+ds = load_dataset("Etherlabs/ios-risk-finetune-v1")
+```
+
+The repository's `dataset_manifest.json` provides content fingerprints for versioned outputs.
+
+---
+
+## Limitations
+
+This project does **not** prove:
+
+- production fraud-loss reduction
+- production model lift on a financial institution's live traffic
+- client ROI
+- generalization to every fraud/risk domain
+- that an LLM fine-tuned on these outputs will outperform simpler models or RAG
+
+Those require separate held-out evaluation and production validation.
+
+---
+
+## IntelligenceOS Context
+
+| Project | Component | Status |
+|---|---|---|
+| Project 01 | Eval Harness | Complete |
+| **Project 02** | **Data Foundry v1** | **Complete / validated prototype** |
+| Project 03 | Domain Intelligence Core / model adaptation | Next stage |
+
+The next model-adaptation stage should compare base models, retrieval, and tuned variants on a held-out evaluation set rather than assuming fine-tuning is the best option.
 
 ---
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE)
+Apache 2.0 — see [`LICENSE`](LICENSE).
 
 ---
 
-## Part of IntelligenceOS
-
-This is Project 02 of the IntelligenceOS build — a public, end-to-end documentation of building a production-grade, domain-specific AI system for financial risk from scratch.
-
-**Built by Ugo Chukwu · [Etherlabs](https://github.com/Etherlabs-dev)**
+**Built by Ugo Chukwu · Etherlabs**  
+Part of the public IntelligenceOS engineering portfolio for production AI + financial systems.
