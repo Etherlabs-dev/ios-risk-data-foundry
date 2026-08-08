@@ -14,37 +14,61 @@ WHY THIS FILE EXISTS:
   that pattern directly. Feature engineering = encoding domain knowledge
   as numbers the model can use.
 """
-import pandas as pd
-import numpy as np
+
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+REQUIRED_COLUMNS = {"Time", "Amount", "Class"}
+
+
+def validate_transaction_frame(df: pd.DataFrame) -> None:
+    """Validate the columns needed by every feature-engineering stage."""
+    missing = REQUIRED_COLUMNS.difference(df.columns)
+    if missing:
+        missing_list = ", ".join(sorted(missing))
+        raise ValueError(f"Transaction data is missing required columns: {missing_list}")
+    if df.empty:
+        raise ValueError("Transaction data must contain at least one row")
+    if df[list(REQUIRED_COLUMNS)].isnull().any().any():
+        raise ValueError("Transaction data contains missing Time, Amount, or Class values")
+
+    non_numeric = [
+        column for column in REQUIRED_COLUMNS if not pd.api.types.is_numeric_dtype(df[column])
+    ]
+    if non_numeric:
+        raise ValueError(f"Transaction columns must be numeric: {', '.join(sorted(non_numeric))}")
 
 
 def engineer_velocity_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Count how many transactions occurred in rolling time windows.
+    Count how many observed transactions occurred in trailing time windows.
 
-    FRAUD SIGNAL: Card testing shows as many small transactions in a
-    short window. Account takeover shows as burst activity after dormancy.
+    DATASET LIMITATION: The public dataset has no card or account identifier,
+    so these columns measure dataset-wide transaction density. They are not
+    account-level velocity and must not be described as such.
 
     NOTE: The Time column is seconds elapsed since the first transaction
     in the dataset — not a real timestamp. We use it for relative
     comparisons, which is all we need.
     """
-    df = df.sort_values('Time').copy()
+    validate_transaction_frame(df)
+    df = df.sort_values("Time", kind="stable").copy()
 
-    # For each transaction, count how many others fall within ±1 hour
-    # This is O(n²) on the full dataset — fine for 284k rows, but for
-    # production you'd use a sliding window approach instead.
-    df['txn_count_1h'] = df['Time'].transform(
-        lambda t: ((df['Time'] - t).abs() < 3600).sum()
-    )
-    df['txn_count_24h'] = df['Time'].transform(
-        lambda t: ((df['Time'] - t).abs() < 86400).sum()
-    )
+    # Count values in the causal interval (time - window, time], including
+    # same-timestamp events but never using later timestamps.
+    # searchsorted keeps this O(n log n), instead of comparing every row
+    # with every other row on the 284k-record public dataset.
+    times = df["Time"].to_numpy()
+    for window_seconds, column in ((3600, "txn_count_1h"), (86400, "txn_count_24h")):
+        left = np.searchsorted(times, times - window_seconds, side="right")
+        right = np.searchsorted(times, times, side="right")
+        df[column] = right - left
 
     # Is the amount escalating over time? (bust-out fraud pattern)
-    df['amount_rolling_mean'] = df['Amount'].expanding().mean()
-    df['amount_vs_mean'] = df['Amount'] / (df['amount_rolling_mean'] + 1e-8)
+    df["amount_rolling_mean"] = df["Amount"].expanding().mean()
+    df["amount_vs_mean"] = df["Amount"] / (df["amount_rolling_mean"] + 1e-8)
 
     return df
 
@@ -63,19 +87,19 @@ def engineer_amount_features(df: pd.DataFrame) -> pd.DataFrame:
     # Z-score: how far is this amount from the mean, in standard deviations?
     # A z-score of 3+ means the amount is extremely unusual.
     # We add 1e-8 to prevent division by zero on edge cases.
-    mean_amt = df['Amount'].mean()
-    std_amt  = df['Amount'].std()
-    df['amount_zscore'] = (df['Amount'] - mean_amt) / (std_amt + 1e-8)
+    mean_amt = df["Amount"].mean()
+    std_amt = df["Amount"].std(ddof=0)
+    df["amount_zscore"] = (df["Amount"] - mean_amt) / (std_amt + 1e-8)
 
     # Round-number flag: fraud often uses round amounts for structuring
-    df['is_round_amount'] = (df['Amount'] % 10 == 0).astype(int)
+    df["is_round_amount"] = (df["Amount"] % 10 == 0).astype(int)
 
     # Micro-transaction flag: card testing pattern
-    df['is_micro_txn'] = (df['Amount'] < 1.0).astype(int)
+    df["is_micro_txn"] = (df["Amount"] < 1.0).astype(int)
 
     # Large transaction flag: above the 95th percentile of amounts
-    p95 = df['Amount'].quantile(0.95)
-    df['is_large_txn'] = (df['Amount'] > p95).astype(int)
+    p95 = df["Amount"].quantile(0.95)
+    df["is_large_txn"] = (df["Amount"] > p95).astype(int)
 
     return df
 
@@ -94,14 +118,14 @@ def engineer_time_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     # Modulo 86400 gives seconds-within-a-day, divide by 3600 for hours
-    df['hour_of_day'] = (df['Time'] % 86400 / 3600).astype(int)
+    df["hour_of_day"] = (df["Time"] % 86400 / 3600).astype(int)
 
     # Off-hours flag: 11pm–6am (hours 23, 0, 1, 2, 3, 4, 5, 6)
     off_hours = list(range(0, 7)) + [23]
-    df['is_off_hours'] = df['hour_of_day'].isin(off_hours).astype(int)
+    df["is_off_hours"] = df["hour_of_day"].isin(off_hours).astype(int)
 
     # Day of week proxy (86400 seconds/day, 7 days/week)
-    df['day_of_week'] = (df['Time'] // 86400 % 7).astype(int)
+    df["day_of_week"] = (df["Time"] // 86400 % 7).astype(int)
 
     return df
 
@@ -110,11 +134,12 @@ def run_full_feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
     """
     Run all feature engineering steps in the correct order.
 
-    ORDER MATTERS: velocity features need the original Time column,
+    ORDER MATTERS: trailing-density features need the original Time column,
     so we run them before dropping it at the end.
     """
-    print(f'Input shape: {df.shape}')
-    print(f'Fraud rate before engineering: {df.Class.mean():.4%}')
+    validate_transaction_frame(df)
+    print(f"Input shape: {df.shape}")
+    print(f"Fraud rate before engineering: {df.Class.mean():.4%}")
 
     df = engineer_velocity_features(df)
     df = engineer_amount_features(df)
@@ -123,26 +148,33 @@ def run_full_feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
     # Drop original Time: it leaks ordering information that won't exist
     # at inference time (you won't know where in the dataset a new
     # transaction falls). The engineered features capture what mattered.
-    df = df.drop(columns=['Time'])
+    df = df.drop(columns=["Time"])
 
-    print(f'Output shape: {df.shape}')
-    print(f'New features added: velocity (4), amount (4), time (3) = 11 total')
-    print(f'Fraud rate after engineering: {df.Class.mean():.4%}  ← must be unchanged')
+    print(f"Output shape: {df.shape}")
+    print("New features added: trailing density (4), amount (4), time (3) = 11 total")
+    print(f"Fraud rate after engineering: {df.Class.mean():.4%}  ← must be unchanged")
 
     return df
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Quick smoke test — run this directly to verify it works
-    raw_path = Path('data/raw/creditcard.csv')
-    print(f'Loading {raw_path}...')
+    raw_path = Path("data/raw/creditcard.csv")
+    print(f"Loading {raw_path}...")
     df = pd.read_csv(raw_path)
 
     # Use a small sample first so this runs fast during development
     sample = df.sample(n=5000, random_state=42)
     engineered = run_full_feature_engineering(sample)
 
-    print(f'\nSample of new columns:')
-    new_cols = ['amount_zscore', 'is_round_amount', 'is_micro_txn',
-                'is_large_txn', 'txn_count_1h', 'hour_of_day', 'is_off_hours']
+    print("\nSample of new columns:")
+    new_cols = [
+        "amount_zscore",
+        "is_round_amount",
+        "is_micro_txn",
+        "is_large_txn",
+        "txn_count_1h",
+        "hour_of_day",
+        "is_off_hours",
+    ]
     print(engineered[new_cols].describe())

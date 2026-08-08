@@ -7,18 +7,22 @@ Run with:
     python -m foundry.pipeline
 
 What it does:
-    1. Loads raw creditcard.csv
-    2. Runs feature engineering
-    3. Formats as Alpaca instruction pairs
-    4. Exports to JSONL for HuggingFace fine-tuning
+    1. Loads source configuration
+    2. Runs enabled source processors
+    3. Merges and deduplicates their instruction pairs
+    4. Exports the final JSONL dataset
 """
 
+from pathlib import Path
 
 import pandas as pd
 import yaml
-from pathlib import Path
+
 from foundry.features.tabular_features import run_full_feature_engineering
 from foundry.formatters import df_to_instruction_pairs, export_to_jsonl
+from foundry.merger import merge_sources
+from foundry.sources.sec_edgar import process_edgar_source
+from foundry.sources.synthetic import process_synthetic_source
 
 
 def load_config(config_path: str = "configs/pipeline_config.yaml") -> dict:
@@ -26,7 +30,7 @@ def load_config(config_path: str = "configs/pipeline_config.yaml") -> dict:
     Load the YAML config file and return it as a Python dict.
     All pipeline parameters come from here — nothing hardcoded below.
     """
-    with open(config_path, 'r') as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f)
     print(f"Config loaded from {config_path}")
     return config
@@ -41,56 +45,71 @@ def load_raw_data(raw_path: str) -> pd.DataFrame:
 
     if not path.exists():
         raise FileNotFoundError(
-            f"Raw data not found at '{raw_path}'.\n"
-            f"Make sure creditcard.csv is in data/raw/"
+            f"Raw data not found at '{raw_path}'.\nMake sure creditcard.csv is in data/raw/"
         )
 
     df = pd.read_csv(path)
 
     print(f"Loaded {len(df):,} rows from {raw_path}")
     print(f"Columns: {list(df.columns)}")
-    print(f"Fraud rate: {df['Class'].mean():.4%}  ({df['Class'].sum():,} fraud / {len(df):,} total)")
+    print(
+        f"Fraud rate: {df['Class'].mean():.4%}  ({df['Class'].sum():,} fraud / {len(df):,} total)"
+    )
 
     return df
 
 
+def _enabled_sources(config: dict) -> list[str]:
+    sources = config.get("sources")
+    if not isinstance(sources, dict):
+        raise ValueError("Config must define a 'sources' mapping")
+    enabled = [name for name, settings in sources.items() if settings.get("enabled", False)]
+    if not enabled:
+        raise ValueError("At least one source must be enabled")
+    unknown = set(enabled).difference({"fraud_transactions", "synthetic", "sec_edgar"})
+    if unknown:
+        raise ValueError(f"Unsupported enabled sources: {', '.join(sorted(unknown))}")
+    return enabled
 
 
-def run_pipeline(config_path: str = "configs/pipeline_config.yaml") -> None:
+def process_tabular_source(config: dict, df: pd.DataFrame) -> None:
+    """Engineer and export instruction pairs for the tabular source."""
+    output_path = config["sources"]["fraud_transactions"]["output_path"]
+    print("\n--- Running tabular feature engineering ---")
+    engineered = run_full_feature_engineering(df)
+    pairs = df_to_instruction_pairs(engineered)
+    export_to_jsonl(pairs, output_path)
+
+
+def run_pipeline(config_path: str = "configs/pipeline_config.yaml") -> list[dict]:
     """
     Orchestrates the full pipeline end to end.
     Reads all parameters from config — nothing hardcoded here.
     """
     # Step 1: Load config
     config = load_config(config_path)
-    raw_path     = config['sources']['fraud_transactions']['raw_path']
-    export_path  = config['exports']['instruction_pairs_path']
+    enabled = _enabled_sources(config)
+    real_df = None
 
-    # Step 2: Load raw data
-    print("\n--- Loading raw data ---")
-    df = load_raw_data(raw_path)
+    if {"fraud_transactions", "synthetic"}.intersection(enabled):
+        raw_path = config["sources"]["fraud_transactions"]["raw_path"]
+        print("\n--- Loading raw transaction data ---")
+        real_df = load_raw_data(raw_path)
 
-    # Step 3: Feature engineering
-    print("\n--- Running feature engineering ---")
-    df_engineered = run_full_feature_engineering(df)
+    if "fraud_transactions" in enabled:
+        process_tabular_source(config, real_df)
+    if "synthetic" in enabled:
+        print("\n--- Running synthetic source ---")
+        process_synthetic_source(config, real_df)
+    if "sec_edgar" in enabled:
+        print("\n--- Running SEC EDGAR source ---")
+        process_edgar_source(config)
 
-    # Step 4: Format as instruction pairs
-    print("\n--- Formatting instruction pairs ---")
-    pairs = df_to_instruction_pairs(df_engineered)
-    print(f"Generated {len(pairs):,} instruction pairs")
+    print("\n--- Merging enabled sources ---")
+    pairs = merge_sources(config, source_names=enabled)
+    print(f"\n✓ Pipeline complete: {len(pairs):,} merged pairs")
+    return pairs
 
-    # Step 5: Export to JSONL
-    print("\n--- Exporting to JSONL ---")
-    export_to_jsonl(pairs, export_path)
-
-    # Step 6: Summary
-    fraud_pairs = sum(1 for p in pairs if p['output'] == 'FRAUD')
-    legit_pairs = sum(1 for p in pairs if p['output'] == 'LEGITIMATE')
-    print(f"\n✓ Pipeline complete")
-    print(f"  Total pairs : {len(pairs):,}")
-    print(f"  Fraud       : {fraud_pairs:,} ({fraud_pairs/len(pairs):.2%})")
-    print(f"  Legitimate  : {legit_pairs:,} ({legit_pairs/len(pairs):.2%})")
-    print(f"  Output file : {export_path}")
 
 if __name__ == "__main__":
     run_pipeline()

@@ -9,10 +9,11 @@ WHY THIS EXISTS:
       from datasets import load_dataset
       ds = load_dataset("Etherlabs/ios-risk-finetune-v1")
 """
+
+import json
+
 from datasets import Dataset
 from huggingface_hub import HfApi
-from pathlib import Path
-import json
 
 
 def build_dataset_card(config: dict) -> str:
@@ -21,7 +22,7 @@ def build_dataset_card(config: dict) -> str:
     The YAML frontmatter is parsed by HuggingFace to populate
     search filters and dataset metadata on the Hub.
     """
-    hf_name = config['exports']['hf_dataset_name']
+    hf_name = config["exports"]["hf_dataset_name"]
 
     card = f"""---
 language:
@@ -58,7 +59,7 @@ Alpaca instruction format — three fields per record:
 
 ```json
 {{
-  "instruction": "Classify this financial transaction as FRAUD or LEGITIMATE based on the features provided.",
+  "instruction": "Classify this transaction as FRAUD or LEGITIMATE.",
   "input": "Amount: $149.62 | Hour: 0 | OffHours: 1 | ...",
   "output": "LEGITIMATE"
 }}
@@ -77,7 +78,7 @@ ds = load_dataset("Etherlabs/{hf_name}")
 - `is_round_amount` — round number flag (structuring signal)
 - `is_micro_txn` — micro transaction flag (card testing signal)
 - `is_large_txn` — above 95th percentile flag
-- `txn_count_1h` / `txn_count_24h` — velocity features
+- `txn_count_1h` / `txn_count_24h` — trailing dataset-density proxies
 - `hour_of_day` / `is_off_hours` — time-based fraud signals
 """
     return card
@@ -88,14 +89,14 @@ def upload_to_huggingface(config: dict) -> None:
     Load the final merged JSONL, convert to HuggingFace Dataset,
     push to Hub, then upload the dataset card.
     """
-    hf_name     = config['exports']['hf_dataset_name']
-    repo_id     = f"Etherlabs/{hf_name}"
-    export_path = config['exports']['instruction_pairs_path']
+    hf_name = config["exports"]["hf_dataset_name"]
+    repo_id = f"Etherlabs/{hf_name}"
+    export_path = config["exports"]["instruction_pairs_path"]
 
     # Step 1: load the merged JSONL into memory
     print(f"Loading {export_path}...")
     records = []
-    with open(export_path, 'r') as f:
+    with open(export_path) as f:
         for line in f:
             line = line.strip()
             if line:
@@ -114,20 +115,20 @@ def upload_to_huggingface(config: dict) -> None:
         private=False,
         token=None,
     )
-    print(f"Dataset pushed successfully")
+    print("Dataset pushed successfully")
 
     # Step 4: upload the dataset card
     print("Uploading dataset card...")
-    api  = HfApi()
+    api = HfApi()
     card = build_dataset_card(config)
     api.upload_file(
-        path_or_fileobj=card.encode('utf-8'),
+        path_or_fileobj=card.encode("utf-8"),
         path_in_repo="README.md",
         repo_id=repo_id,
         repo_type="dataset",
     )
 
-    print(f"\n✓ Upload complete")
+    print("\n✓ Upload complete")
     print(f"  Dataset : https://huggingface.co/datasets/{repo_id}")
     print(f"  Records : {len(records):,}")
     print(f"  Load with: dataset = load_dataset('{repo_id}')")
@@ -135,5 +136,7 @@ def upload_to_huggingface(config: dict) -> None:
 
 if __name__ == "__main__":
     import yaml
-    config = yaml.safe_load(open('configs/pipeline_config.yaml'))
+
+    with open("configs/pipeline_config.yaml", encoding="utf-8") as config_file:
+        config = yaml.safe_load(config_file)
     upload_to_huggingface(config)
