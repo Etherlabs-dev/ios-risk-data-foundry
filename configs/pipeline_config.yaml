@@ -10,8 +10,12 @@ sources:
     raw_path: data/raw/creditcard.csv
     output_path: data/processed/fraud_transaction_pairs.jsonl
 
+  # DO NOT ENABLE. Superseded by bsa_regulations. This path templates its
+  # answer from the search query rather than the filing text, so every chunk
+  # retrieved for one query shares an identical fabricated answer. See
+  # foundry/sources/bsa_regulations.py for the replacement and the reasoning.
   sec_edgar:
-    enabled: false  # opt in: this source performs live SEC network requests
+    enabled: false
     output_path: data/processed/edgar_risk_chunks.jsonl
     queries:
       - "fraud risk financial institution"
@@ -35,6 +39,14 @@ sources:
   # dataset_manifest.json) but never registered here or in merger.py, so it
   # never reached the published dataset. That is why v1 has one instruction
   # and two outputs.
+  # 31 CFR Chapter X via the public eCFR API — real regulatory language with
+  # real citations. Replaces sec_edgar.
+  bsa_regulations:
+    enabled: true
+    output_path: data/processed/bsa_regulation_pairs.jsonl
+    date: "2026-01-01"
+    variants_per_section: 4
+
   synthetic_scenarios:
     enabled: true
     output_path: data/processed/synthetic_scenario_pairs.jsonl

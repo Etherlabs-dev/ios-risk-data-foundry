@@ -70,7 +70,7 @@ def merge_sources(config: dict, source_names: list[str] | None = None) -> list[d
     """
     export_path = config["exports"]["instruction_pairs_path"]
     if source_names is None:
-        source_names = ["fraud_transactions", "synthetic_scenarios", "synthetic", "sec_edgar"]
+        source_names = ["fraud_transactions", "synthetic_scenarios", "bsa_regulations", "synthetic"]
 
     print("\n--- Loading sources ---")
     all_pairs = []
