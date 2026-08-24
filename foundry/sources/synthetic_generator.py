@@ -18,6 +18,30 @@ from pathlib import Path
 import numpy as np
 
 
+def format_feature_line(amount: float, hour: int, txn_count: int) -> str:
+    """
+    Render the observable features of a transaction as the model's input.
+
+    Deliberately excludes fraud_type and risk_level. Those are the ANSWER —
+    putting them in the input teaches the model to copy rather than infer,
+    and the Project 03 eval prompts do not supply them. Every field here is
+    something a payment processor can observe before a label exists.
+    """
+    is_micro = int(amount < 2.00)
+    is_large = int(amount > 500.00)
+    is_off_hours = int(hour < 6 or hour >= 22)
+    is_round = int(amount >= 10 and float(amount).is_integer() and amount % 10 == 0)
+    return (
+        f"Amount: ${amount:.2f} | "
+        f"Hour: {hour} | "
+        f"TxnCount1h: {txn_count} | "
+        f"MicroTxn: {is_micro} | "
+        f"OffHours: {is_off_hours} | "
+        f"LargeTxn: {is_large} | "
+        f"RoundAmt: {is_round}"
+    )
+
+
 class FraudScenarioFactory:
     """
     Generates realistic fraud and legitimate transaction scenarios.
@@ -226,12 +250,10 @@ def build_synthetic_dataset(
                     "You are IOS Risk, an AI system for financial risk assessment. "
                     "Analyse the following transaction and assess its fraud risk."
                 ),
-                "input": (
-                    f"Amount: ${record['Amount']:.2f} | "
-                    f"TxnCount1h: {record['txn_count_1h']} | "
-                    f"Hour: {int(record['Time']) // 3600 % 24} | "
-                    f"FraudType: {record['fraud_type']} | "
-                    f"RiskLevel: {record['risk_level']}"
+                "input": format_feature_line(
+                    amount=record["Amount"],
+                    hour=int(record["Time"]) // 3600 % 24,
+                    txn_count=record["txn_count_1h"],
                 ),
                 "output": record["risk_explanation"],
             }
@@ -249,12 +271,8 @@ def build_synthetic_dataset(
                 "You are IOS Risk, an AI system for financial risk assessment. "
                 "Analyse the following transaction and assess its fraud risk."
             ),
-            "input": (
-                f"Amount: ${amount:.2f} | "
-                f"TxnCount1h: {txn_count} | "
-                f"Hour: {hour} | "
-                f"FraudType: none | "
-                f"RiskLevel: LOW"
+            "input": format_feature_line(
+                amount=amount, hour=hour, txn_count=txn_count
             ),
             "output": (
                 f"LOW RISK — LEGITIMATE TRANSACTION. "

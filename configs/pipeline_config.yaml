@@ -30,6 +30,21 @@ sources:
     n_legit: 8000
     seed: 42
 
+  # Fraud Scenario Factory — the only source that produces risk TIERS and
+  # written reasoning rather than bare labels. It was generated for v1 (see
+  # dataset_manifest.json) but never registered here or in merger.py, so it
+  # never reached the published dataset. That is why v1 has one instruction
+  # and two outputs.
+  synthetic_scenarios:
+    enabled: true
+    output_path: data/processed/synthetic_scenario_pairs.jsonl
+    n_fraud: 2000
+    n_legit: 8000
+    seed: 42
+
 exports:
-  instruction_pairs_path: data/exports/ios_risk_finetune_v1.jsonl
-  hf_dataset_name: ios-risk-finetune-v1
+  # v2 supersedes v1. v1 shipped tabular-only (1 instruction, 2 outputs,
+  # 99.1% imbalance) because synthetic/sec_edgar were disabled and the
+  # scenario pairs were never a registered source. See scripts/build_finetune_v2.py.
+  instruction_pairs_path: data/exports/ios_risk_finetune_v2.jsonl
+  hf_dataset_name: ios-risk-finetune-v2
