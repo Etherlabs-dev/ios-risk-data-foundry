@@ -1,0 +1,27 @@
+IOS Risk Data Foundry
+Copyright (c) Etherlabs
+
+--------------------------------------------------------------------------
+Third-party model attribution
+--------------------------------------------------------------------------
+
+Portions of the reasoning prose in the v3 instruction pairs were rewritten
+from templated drafts using NVIDIA Nemotron models via the NVIDIA NIM API.
+
+    Licensed by NVIDIA Corporation under the NVIDIA Open Model License
+
+Verdicts, risk tiers, typology labels and all numeric figures were produced
+by this repository's own generators and were held fixed during rewriting;
+the model altered wording only. Every rewrite was validated against the
+source record and rejected on drift.
+
+--------------------------------------------------------------------------
+Data sources
+--------------------------------------------------------------------------
+
+Bank Secrecy Act regulation text: 31 CFR Chapter X, retrieved from the
+eCFR API (https://www.ecfr.gov/api). U.S. federal regulations are in the
+public domain.
+
+Credit card fraud transactions: ULB/Kaggle public credit card fraud
+dataset (DbCL v1.0).
