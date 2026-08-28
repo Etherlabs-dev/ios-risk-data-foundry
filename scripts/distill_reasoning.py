@@ -134,15 +134,33 @@ def validate(original: dict[str, Any], rewritten: str) -> tuple[bool, str]:
 
 
 def call_model(client: Any, model: str, messages: list[dict[str, str]],
-               retries: int = 4) -> str | None:
+               extra_body: dict[str, Any] | None = None,
+               max_tokens: int = 700, retries: int = 4) -> str | None:
+    """
+    One rewrite. Returns None if the provider never produced usable content.
+
+    Reasoning models (NVIDIA Nemotron, and others) return their chain of thought
+    in `reasoning_content` and the answer in `content`. With thinking enabled the
+    reasoning can consume the whole token budget, leaving `content` empty or None
+    — so thinking is disabled by default via --extra-body, and a None content is
+    treated as a failure rather than crashing on .strip().
+    """
+    kwargs: dict[str, Any] = dict(
+        model=model, messages=messages,
+        temperature=0.9,       # high: variety is the entire point
+        max_tokens=max_tokens,
+    )
+    if extra_body:
+        kwargs["extra_body"] = extra_body
+
     for attempt in range(retries):
         try:
-            resp = client.chat.completions.create(
-                model=model, messages=messages,
-                temperature=0.9,       # high: variety is the entire point
-                max_tokens=400,
-            )
-            return resp.choices[0].message.content.strip()
+            resp = client.chat.completions.create(**kwargs)
+            content = resp.choices[0].message.content
+            if not content or not content.strip():
+                print("    empty content (model may have spent the budget thinking)")
+                return None
+            return content.strip()
         except Exception as exc:  # noqa: BLE001 - provider errors vary widely
             wait = 2 ** attempt
             print(f"    retry {attempt + 1}/{retries} after {type(exc).__name__} ({wait}s)")
@@ -158,6 +176,17 @@ def main() -> int:
     ap.add_argument("--model", default="Qwen/Qwen2.5-72B-Instruct")
     ap.add_argument("--limit", type=int, default=0, help="0 = all records")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--max-tokens", type=int, default=700)
+    ap.add_argument(
+        "--extra-body",
+        default='{"chat_template_kwargs": {"enable_thinking": false}}',
+        help=(
+            "JSON passed through as extra_body. The default disables reasoning, "
+            "which is what NVIDIA Nemotron needs: this is constrained rewriting, "
+            "not a problem to think about, and thinking tokens crowd out the "
+            "answer. Pass '{}' for providers that reject the field."
+        ),
+    )
     args = ap.parse_args()
 
     api_key = os.environ.get("DISTILL_API_KEY")
@@ -173,6 +202,12 @@ def main() -> int:
 
     client = OpenAI(api_key=api_key, base_url=args.base_url)
 
+    try:
+        extra_body = json.loads(args.extra_body) or None
+    except json.JSONDecodeError as exc:
+        print(f"--extra-body is not valid JSON: {exc}", file=sys.stderr)
+        return 1
+
     records = [json.loads(x) for x in Path(args.inp).read_text().splitlines() if x.strip()]
     if args.limit:
         random.Random(args.seed).shuffle(records)
@@ -186,7 +221,8 @@ def main() -> int:
 
     with out_path.open("w", encoding="utf-8") as f:
         for i, rec in enumerate(records, 1):
-            text = call_model(client, args.model, build_messages(rec))
+            text = call_model(client, args.model, build_messages(rec),
+                              extra_body=extra_body, max_tokens=args.max_tokens)
             if text is None:
                 failed += 1
                 out = rec["output"]           # provider gave up: keep the template
