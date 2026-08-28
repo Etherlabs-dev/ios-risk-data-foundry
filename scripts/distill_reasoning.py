@@ -57,6 +57,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+class FatalProviderError(RuntimeError):
+    """Provider error that will not improve on retry — abort the run."""
+
+
 SYSTEM = (
     "You are a senior AML analyst writing case notes. You rewrite draft "
     "assessments into natural analyst prose. You never change the verdict, the "
@@ -153,6 +157,11 @@ def call_model(client: Any, model: str, messages: list[dict[str, str]],
     if extra_body:
         kwargs["extra_body"] = extra_body
 
+    # A wrong model id or a bad key is not transient. Retrying it 4 times per
+    # record and then walking the whole file wastes minutes to rediscover a
+    # config error on every single row, so those abort the run immediately.
+    fatal = ("NotFoundError", "AuthenticationError", "PermissionDeniedError")
+
     for attempt in range(retries):
         try:
             resp = client.chat.completions.create(**kwargs)
@@ -162,8 +171,19 @@ def call_model(client: Any, model: str, messages: list[dict[str, str]],
                 return None
             return content.strip()
         except Exception as exc:  # noqa: BLE001 - provider errors vary widely
+            kind = type(exc).__name__
+            if kind in fatal:
+                raise FatalProviderError(
+                    f"{kind}: {exc}\n\n"
+                    f"  model    : {model}\n"
+                    f"  base_url : {getattr(client, 'base_url', '?')}\n\n"
+                    "A 404 means the endpoint does not recognise that model id for\n"
+                    "this key; 401/403 means the key is rejected. Neither improves\n"
+                    "by retrying. List what the key can actually reach:\n\n"
+                    "  curl -s <base_url>/models -H \"Authorization: Bearer $DISTILL_API_KEY\""
+                ) from exc
             wait = 2 ** attempt
-            print(f"    retry {attempt + 1}/{retries} after {type(exc).__name__} ({wait}s)")
+            print(f"    retry {attempt + 1}/{retries} after {kind} ({wait}s)")
             time.sleep(wait)
     return None
 
@@ -221,8 +241,12 @@ def main() -> int:
 
     with out_path.open("w", encoding="utf-8") as f:
         for i, rec in enumerate(records, 1):
-            text = call_model(client, args.model, build_messages(rec),
-                              extra_body=extra_body, max_tokens=args.max_tokens)
+            try:
+                text = call_model(client, args.model, build_messages(rec),
+                                  extra_body=extra_body, max_tokens=args.max_tokens)
+            except FatalProviderError as exc:
+                print(f"\nAborting on record {i}: {exc}", file=sys.stderr)
+                return 1
             if text is None:
                 failed += 1
                 out = rec["output"]           # provider gave up: keep the template
