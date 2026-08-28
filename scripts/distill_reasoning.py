@@ -79,6 +79,8 @@ HARD CONSTRAINTS — violating any of these makes the output unusable:
   "LOW RISK — NO TYPOLOGY DETECTED.")
 - End with a recommended action consistent with the tier.
 - 90 to 160 words. Vary your phrasing from any standard template.
+- Output the case note only. Do not append a word count or any other note
+  about your own output.
 
 ACCOUNT ACTIVITY:
 {features}
@@ -104,9 +106,56 @@ def build_messages(record: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+META_ANNOTATION = re.compile(
+    r"\(\s*(?:approx\.?\s*)?\d+\s*(?:words?|characters?|chars?)\s*\)\s*$",
+    re.IGNORECASE,
+)
+
+
+def strip_meta(text: str) -> str:
+    """
+    Remove the model's commentary about its own output.
+
+    Asking for "90 to 160 words" reliably provokes a trailing "(148 words)".
+    That is not part of the case note and its digits are not a claim about the
+    account, so it must not count as an invented figure.
+    """
+    return META_ANNOTATION.sub("", text.strip()).strip()
+
+
 def numbers_in(text: str) -> set[str]:
     """Figures the rewrite must preserve. Commas stripped so $9,500 == $9500."""
     return set(re.findall(r"\d+(?:\.\d+)?", text.replace(",", "")))
+
+
+def derivable(source: set[str]) -> set[str]:
+    """
+    Values an analyst could correctly compute from the source figures.
+
+    "$27,600 of cash against $18,000 declared income" legitimately supports
+    "153% of stated annual income". That is arithmetic, not invention, and
+    rejecting it discards exactly the reasoning the rewrite is meant to add.
+    Ratios and multiples of every ordered pair are allowed, rounded the way a
+    person would write them.
+    """
+    vals = []
+    for x in source:
+        try:
+            vals.append(float(x))
+        except ValueError:
+            continue
+
+    out: set[str] = set()
+    for a in vals:
+        for b in vals:
+            if b == 0:
+                continue
+            for v in (a / b * 100, a / b):
+                if not (0 < v < 1e7):
+                    continue
+                out.add(str(int(round(v))))
+                out.add(f"{v:.1f}")
+    return out
 
 
 def validate(original: dict[str, Any], rewritten: str) -> tuple[bool, str]:
@@ -114,6 +163,8 @@ def validate(original: dict[str, Any], rewritten: str) -> tuple[bool, str]:
     Reject rewrites that drift. Cheaper to discard and keep the template than
     to train on a confident-sounding fabrication.
     """
+    rewritten = strip_meta(rewritten)
+
     tier = original["risk_tier"]
     if not rewritten.upper().startswith(f"{tier} RISK"):
         return False, f"does not open with {tier} RISK"
@@ -125,7 +176,8 @@ def validate(original: dict[str, Any], rewritten: str) -> tuple[bool, str]:
             return False, f"typology '{token}' missing"
 
     # Every figure in the rewrite must have existed in the source material.
-    allowed = numbers_in(original["input"]) | numbers_in(original["output"])
+    source = numbers_in(original["input"]) | numbers_in(original["output"])
+    allowed = source | derivable(source)
     invented = numbers_in(rewritten) - allowed
     if invented:
         return False, f"invented figures: {sorted(invented)[:5]}"
