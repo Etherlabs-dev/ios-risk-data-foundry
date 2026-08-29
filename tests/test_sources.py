@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from foundry.sources import sec_edgar
+from foundry.sources.aml_typologies import build_aml_dataset
 from foundry.sources.sec_edgar import fetch_filing_text, fetch_filing_urls, process_edgar_source
 from foundry.sources.synthetic import generate_synthetic_fraud, generate_synthetic_legit
 from foundry.sources.synthetic_generator import build_synthetic_dataset
@@ -65,7 +66,15 @@ def test_scenario_generation_preserves_requested_count_and_seed(tmp_path):
     assert first.read_bytes() == second.read_bytes()
     records = [json.loads(line) for line in first.read_text(encoding="utf-8").splitlines()]
     assert len(records) == 8
-    assert sum(record["input"].endswith("RiskLevel: LOW") for record in records) == 3
+    assert all("RiskLevel" not in record["input"] for record in records)
+    assert all("fraud_type" not in record["input"] for record in records)
+
+
+def test_aml_generation_produces_unique_inputs(tmp_path):
+    output = tmp_path / "aml.jsonl"
+    records = build_aml_dataset(n_per_typology=3, n_legitimate=7, output_path=str(output), seed=19)
+    assert len(records) == 25
+    assert len({record["input"] for record in records}) == 25
 
 
 def test_fetch_filing_urls_parses_valid_hits_and_skips_malformed(monkeypatch):

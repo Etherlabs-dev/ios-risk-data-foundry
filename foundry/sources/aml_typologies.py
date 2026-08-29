@@ -53,15 +53,23 @@ TYPOLOGY_TIERS = {
 # Recommended action per tier. SAR is a regulatory filing, EDD is enhanced
 # due diligence — the distinction matters and the model should learn it.
 TIER_ACTIONS = {
-    "CRITICAL": "File SAR within 30 days and freeze pending investigation",
-    "HIGH": "File SAR within 30 days and apply enhanced due diligence",
+    "CRITICAL": (
+        "Escalate immediately, preserve records, and assess SAR filing under "
+        "applicable rules; restrict activity only where policy and legal authority permit"
+    ),
+    "HIGH": "Escalate for enhanced due diligence and assess SAR filing under applicable rules",
     "LOW": "No action. Continue standard monitoring",
 }
 
 OCCUPATIONS = [
-    ("student", 18_000), ("retail associate", 32_000), ("rideshare driver", 41_000),
-    ("teacher", 55_000), ("nurse", 78_000), ("software engineer", 130_000),
-    ("unemployed", 0), ("restaurant server", 29_000),
+    ("student", 18_000),
+    ("retail associate", 32_000),
+    ("rideshare driver", 41_000),
+    ("teacher", 55_000),
+    ("nurse", 78_000),
+    ("software engineer", 130_000),
+    ("unemployed", 0),
+    ("restaurant server", 29_000),
 ]
 CORRIDORS = ["UAE", "Hong Kong", "Cyprus", "Panama", "Turkey", "Singapore", "Nigeria"]
 
@@ -109,12 +117,20 @@ class AMLTypologyFactory:
         total = sum(amounts)
         days = self.rng.randint(2, 10)
         branches = self.rng.randint(2, 5)
+        cash_to_income = (
+            "undefined (no declared income)"
+            if p["declared_income"] == 0
+            else f"{total / p['declared_income']:.1f}x"
+        )
         activity = {
             "CashDeposits": n,
             "DepositWindowDays": days,
             "LargestDeposit": f"${max(amounts):,}",
+            "SmallestDeposit": f"${min(amounts):,}",
             "TotalCashDeposited": f"${total:,}",
             "DistinctBranches": branches,
+            "CTRThreshold": f"${CTR_THRESHOLD:,}",
+            "CashToDeclaredIncome": cash_to_income,
             "WiresOut": self.rng.randint(0, 2),
             "PriorSARs": 0,
         }
@@ -146,11 +162,12 @@ class AMLTypologyFactory:
         p = self._profile()
         depositors = self.rng.randint(4, 12)
         per = self.rng.randrange(3_000, 9_000, 100)
+        deposits = depositors * self.rng.randint(1, 2)
         activity = {
-            "CashDeposits": depositors * self.rng.randint(1, 2),
+            "CashDeposits": deposits,
             "DistinctDepositors": depositors,
             "AvgDepositAmount": f"${per:,}",
-            "TotalCashDeposited": f"${per * depositors:,}",
+            "TotalCashDeposited": f"${per * deposits:,}",
             "DepositWindowDays": self.rng.randint(1, 5),
             "RelationshipToDepositors": "undocumented",
             "PriorSARs": 0,
@@ -159,7 +176,7 @@ class AMLTypologyFactory:
             f"Cash arriving from {depositors} distinct depositors with no documented "
             f"relationship to the account holder, averaging ${per:,} each. This is "
             f"structuring distributed across multiple individuals — each deposit is "
-            f"unremarkable alone, but the aggregate of ${per * depositors:,} into one "
+            f"unremarkable alone, but the aggregate of ${per * deposits:,} into one "
             f"account within days indicates coordinated placement."
         )
         return self._render(p, activity), why, "smurfing"
@@ -196,6 +213,7 @@ class AMLTypologyFactory:
         activity = {
             "InboundP2PTransfers": inbound,
             "DistinctSenders": inbound,
+            "SenderRelationship": "undocumented",
             "TotalInbound": f"${amount:,}",
             "OutboundCashWithdrawals": self.rng.randint(3, 12),
             "PctForwardedWithin48h": self.rng.randint(85, 99),
@@ -215,11 +233,13 @@ class AMLTypologyFactory:
         p = self._profile()
         declared = self.rng.randrange(80_000, 900_000, 1_000)
         market = int(declared * self.rng.uniform(0.10, 0.35))
+        gap_pct = 100 - int(100 * market / declared)
         corridor = self.rng.choice(CORRIDORS)
         activity = {
             "TradeInvoices": self.rng.randint(2, 9),
             "DeclaredInvoiceValue": f"${declared:,}",
             "AssessedMarketValue": f"${market:,}",
+            "InvoiceValueGapPct": gap_pct,
             "Corridor": corridor,
             "GoodsCategory": self.rng.choice(
                 ["electronics components", "textiles", "scrap metal", "machinery parts"]
@@ -230,7 +250,7 @@ class AMLTypologyFactory:
         why = (
             f"Invoices declare ${declared:,} against an assessed market value of "
             f"${market:,} — an over-invoicing gap of roughly "
-            f"{100 - int(100 * market / declared)}%. Mispricing of this magnitude on a "
+            f"{gap_pct}%. Mispricing of this magnitude on a "
             f"{corridor} corridor, with incomplete shipping documentation, is trade-based "
             f"money laundering: value is moved across borders disguised as commerce."
         )
@@ -266,43 +286,68 @@ class AMLTypologyFactory:
         variant = self.rng.choice(["bonus", "property", "business", "routine"])
         if variant == "bonus":
             amt = self.rng.randrange(8_000, 30_000, 500)
-            activity = {"InboundWires": 1, "InboundAmount": f"${amt:,}",
-                        "Source": "employer payroll (documented)",
-                        "OutboundTransfers": 1, "Destination": "own brokerage account",
-                        "PriorSARs": 0}
-            why = (f"Single documented payroll wire of ${amt:,} moved to the holder's own "
-                   f"brokerage account. Source, purpose and beneficiary are all verified, "
-                   f"and the amount is consistent with a {p['occupation']} receiving an "
-                   f"annual bonus. No layering: funds moved once, to a self-owned account.")
+            activity = {
+                "InboundWires": 1,
+                "InboundAmount": f"${amt:,}",
+                "Source": "employer payroll (documented)",
+                "OutboundTransfers": 1,
+                "Destination": "own brokerage account",
+                "PriorSARs": 0,
+            }
+            why = (
+                f"Single documented payroll wire of ${amt:,} moved to the holder's own "
+                f"brokerage account. Source, purpose and beneficiary are all verified, "
+                "and the payment is documented as an annual bonus. No layering: funds "
+                "moved once, to a verified self-owned account."
+            )
         elif variant == "property":
             amt = self.rng.randrange(60_000, 400_000, 5_000)
-            activity = {"InboundWires": 1, "InboundAmount": f"${amt:,}",
-                        "Source": "title company escrow (documented)",
-                        "OutboundTransfers": 1, "Destination": "mortgage lender",
-                        "PriorSARs": 0}
-            why = (f"${amt:,} received from a title company and disbursed to a mortgage "
-                   f"lender. Large and fast, but every leg is documented and the "
-                   f"counterparties are regulated institutions. Rapid movement alone is "
-                   f"not layering when the economic purpose is evidenced.")
+            activity = {
+                "InboundWires": 1,
+                "InboundAmount": f"${amt:,}",
+                "Source": "title company escrow (documented)",
+                "OutboundTransfers": 1,
+                "Destination": "mortgage lender",
+                "PriorSARs": 0,
+            }
+            why = (
+                f"${amt:,} received from a title company and disbursed to a mortgage "
+                f"lender. Large and fast, but every leg is documented and the "
+                f"counterparties are regulated institutions. Rapid movement alone is "
+                f"not layering when the economic purpose is evidenced."
+            )
         elif variant == "business":
             n = self.rng.randint(8, 25)
             amt = self.rng.randrange(20_000, 120_000, 500)
-            activity = {"CashDeposits": n, "TotalCashDeposited": f"${amt:,}",
-                        "BusinessType": "registered cash-intensive retail",
-                        "DepositWindowDays": 30, "DistinctBranches": 1,
-                        "DepositPatternVsPrior12m": "consistent", "PriorSARs": 0}
-            why = (f"{n} cash deposits totalling ${amt:,} over 30 days from a registered "
-                   f"cash-intensive retail business, all at one branch, consistent with the "
-                   f"prior 12 months. Cash volume alone is not suspicious where the business "
-                   f"model explains it and the pattern is stable.")
+            activity = {
+                "CashDeposits": n,
+                "TotalCashDeposited": f"${amt:,}",
+                "BusinessType": "registered cash-intensive retail",
+                "DepositWindowDays": 30,
+                "DistinctBranches": 1,
+                "DepositPatternVsPrior12m": "consistent",
+                "PriorSARs": 0,
+            }
+            why = (
+                f"{n} cash deposits totalling ${amt:,} over 30 days from a registered "
+                f"cash-intensive retail business, all at one branch, consistent with the "
+                f"prior 12 months. Cash volume alone is not suspicious where the business "
+                f"model explains it and the pattern is stable."
+            )
         else:
             amt = self.rng.randrange(500, 6_000, 50)
-            activity = {"InboundTransfers": self.rng.randint(1, 3),
-                        "TotalInbound": f"${amt:,}", "OutboundTransfers": self.rng.randint(1, 4),
-                        "DepositWindowDays": 30, "PriorSARs": 0}
-            why = (f"Routine activity totalling ${amt:,} over 30 days, proportionate to a "
-                   f"declared income of ${p['declared_income']:,}. No velocity, threshold, "
-                   f"or counterparty anomalies present.")
+            activity = {
+                "InboundTransfers": self.rng.randint(1, 3),
+                "TotalInbound": f"${amt:,}",
+                "OutboundTransfers": self.rng.randint(1, 4),
+                "DepositWindowDays": 30,
+                "PriorSARs": 0,
+            }
+            why = (
+                f"Routine activity totalling ${amt:,} over 30 days, proportionate to a "
+                f"declared income of ${p['declared_income']:,}. No velocity, threshold, "
+                f"or counterparty anomalies present."
+            )
         return self._render(p, activity), why, "legitimate"
 
 
@@ -324,33 +369,39 @@ def build_aml_dataset(
     }
 
     pairs: list[dict[str, str]] = []
-    for name, gen in generators.items():
-        for _ in range(n_per_typology):
-            features, why, typology = gen()
-            tier = TYPOLOGY_TIERS[typology]
-            pairs.append({
-                "instruction": INSTRUCTION,
-                "input": features,
-                "output": (
-                    f"{tier} RISK — {typology.upper().replace('_', ' ')} DETECTED. "
-                    f"{why} Recommended action: {TIER_ACTIONS[tier]}."
-                ),
-                "typology": typology,
-                "risk_tier": tier,
-            })
+    seen_inputs: set[str] = set()
 
-    for _ in range(n_legitimate):
-        features, why, typology = factory.legitimate()
-        pairs.append({
-            "instruction": INSTRUCTION,
-            "input": features,
-            "output": (
-                f"LOW RISK — NO TYPOLOGY DETECTED. {why} "
-                f"Recommended action: {TIER_ACTIONS['LOW']}."
-            ),
-            "typology": typology,
-            "risk_tier": "LOW",
-        })
+    def append_unique(generator, count: int) -> None:
+        start = len(pairs)
+        attempts = 0
+        while len(pairs) - start < count:
+            attempts += 1
+            if attempts > count * 50:
+                raise RuntimeError("Could not generate enough unique AML cases")
+            features, why, typology = generator()
+            if features in seen_inputs:
+                continue
+            seen_inputs.add(features)
+            tier = TYPOLOGY_TIERS[typology]
+            prefix = (
+                "LOW RISK — NO TYPOLOGY DETECTED."
+                if typology == "legitimate"
+                else f"{tier} RISK — {typology.upper().replace('_', ' ')} DETECTED."
+            )
+            pairs.append(
+                {
+                    "instruction": INSTRUCTION,
+                    "input": features,
+                    "output": f"{prefix} {why} Recommended action: {TIER_ACTIONS[tier]}.",
+                    "typology": typology,
+                    "risk_tier": tier,
+                }
+            )
+
+    for gen in generators.values():
+        append_unique(gen, n_per_typology)
+
+    append_unique(factory.legitimate, n_legitimate)
 
     random.Random(seed).shuffle(pairs)
     out = Path(output_path)

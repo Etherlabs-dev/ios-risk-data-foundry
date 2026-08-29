@@ -147,10 +147,11 @@ def topic_from_heading(heading: str) -> str:
     return topic[0].lower() + topic[1:] if topic else "this requirement"
 
 
-def build_pairs(sections: list[dict[str, str]], part: str,
-                variants_per_section: int = 4) -> list[dict[str, Any]]:
+def build_pairs(
+    sections: list[dict[str, str]], part: str, variants_per_section: int = 4
+) -> list[dict[str, Any]]:
     pairs: list[dict[str, Any]] = []
-    for i, sec in enumerate(sections):
+    for sec in sections:
         body = sec["body"]
         if len(body) < MIN_ANSWER_CHARS:
             continue  # cross-references and reserved sections carry no content
@@ -158,8 +159,8 @@ def build_pairs(sections: list[dict[str, str]], part: str,
             cut = body[:MAX_ANSWER_CHARS]
             body = cut[: cut.rfind(". ") + 1] if ". " in cut else cut
 
-        topic = topic_from_heading(sec["heading"])
         citation = f"31 CFR § {sec['citation']}"
+        topic = f"{topic_from_heading(sec['heading'])} under {citation}"
         # The eCFR heading already carries the section number; repeating it
         # would render as "Under 31 CFR § 1020.320 (§ 1020.320 Reports ...)".
         title = re.sub(r"^§?\s*[\d.]+\s*", "", sec["heading"]).strip().rstrip(".")
@@ -170,14 +171,16 @@ def build_pairs(sections: list[dict[str, str]], part: str,
         # robustness to how a compliance question is worded, which is the actual
         # skill; it does not invent regulatory content.
         for form in QUESTION_FORMS[:variants_per_section]:
-            pairs.append({
-                "instruction": INSTRUCTION,
-                "input": form.format(topic=topic),
-                "output": f"Under {citation} ({title}): {body}",
-                "citation": citation,
-                "part": part,
-                "source": "eCFR 31 CFR Chapter X",
-            })
+            pairs.append(
+                {
+                    "instruction": INSTRUCTION,
+                    "input": form.format(topic=topic),
+                    "output": f"Under {citation} ({title}): {body}",
+                    "citation": citation,
+                    "part": part,
+                    "source": "eCFR 31 CFR Chapter X",
+                }
+            )
     return pairs
 
 
@@ -186,6 +189,7 @@ def build_bsa_dataset(
     date: str = "2026-01-01",
     output_path: str = "data/processed/bsa_regulation_pairs.jsonl",
     cache_dir: str = "data/raw/ecfr",
+    variants_per_section: int = 4,
 ) -> list[dict[str, Any]]:
     parts = parts or list(CHAPTER_X_PARTS)
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
@@ -200,7 +204,7 @@ def build_bsa_dataset(
             print(f"Part {part} ({CHAPTER_X_PARTS.get(part, '')}) — fetching")
             raw = fetch(ECFR_FULL.format(date=date, part=part))
             if raw is None:
-                print(f"  skipped: eCFR unavailable after retries")
+                print("  skipped: eCFR unavailable after retries")
                 continue
             cache.write_bytes(raw)
 
@@ -211,7 +215,7 @@ def build_bsa_dataset(
             cache.unlink(missing_ok=True)
             continue
 
-        pairs = build_pairs(sections, part)
+        pairs = build_pairs(sections, part, variants_per_section=variants_per_section)
         print(f"  {len(sections)} sections -> {len(pairs)} pairs")
         all_pairs.extend(pairs)
         time.sleep(1)  # be polite to a public service

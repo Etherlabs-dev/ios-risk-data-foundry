@@ -55,8 +55,7 @@ sources:
     seed: 42
 
 exports:
-  # v2 supersedes v1. v1 shipped tabular-only (1 instruction, 2 outputs,
-  # 99.1% imbalance) because synthetic/sec_edgar were disabled and the
-  # scenario pairs were never a registered source. See scripts/build_finetune_v2.py.
-  instruction_pairs_path: data/exports/ios_risk_finetune_v2.jsonl
-  hf_dataset_name: ios-risk-finetune-v2
+  # v3 is the first Project 03 export with strict distillation validation,
+  # source-record and CFR-section holdouts, and grounded scenario features.
+  instruction_pairs_path: data/exports/ios_risk_finetune_v3.jsonl
+  hf_dataset_name: ios-risk-finetune-v3

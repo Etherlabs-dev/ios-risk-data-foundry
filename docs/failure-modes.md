@@ -6,7 +6,7 @@ This document records the main ways a domain-data pipeline like IOS Risk Data Fo
 
 ### Upstream availability
 
-**Risk:** SEC endpoints, external dataset hosts, or other public sources can be unavailable or rate-limited.
+**Risk:** eCFR endpoints, external dataset hosts, or model APIs can be unavailable or rate-limited.
 
 **Mitigation:**
 - cache source artifacts when licensing permits;
@@ -75,6 +75,17 @@ This document records the main ways a domain-data pipeline like IOS Risk Data Fo
 - record generator configuration;
 - fingerprint outputs.
 
+### Unsupported synthetic reasoning
+
+**Risk:** an answer cites a device, history, threshold, total, score, or probability that the
+prompt never supplied. The model then learns persuasive fabrication.
+
+**Mitigation:**
+- render every scenario fact needed by the answer into the input;
+- reject unsupported numeric claims during distillation;
+- prohibit invented probabilities and model scores in the release validator;
+- score unsupported claims explicitly in downstream evaluation.
+
 ## Evaluation failures
 
 ### Validation-set overfitting
@@ -104,7 +115,7 @@ The current documented benchmark is a good example: recall increases while preci
 
 ## Distribution shift
 
-**Risk:** public fraud data, SEC language, or synthetic examples do not match a target institution's production traffic.
+**Risk:** public fraud data, BSA text, or synthetic examples do not match a target institution's production traffic.
 
 **Mitigation:**
 - evaluate on representative target-domain data before deployment;
@@ -128,7 +139,7 @@ The current documented benchmark is a good example: recall increases while preci
 
 The baseline GitHub Actions job should remain deterministic and must not depend on:
 - downloading the full Kaggle dataset;
-- live SEC network access;
+- live eCFR network access;
 - Hugging Face credentials;
 - external model services.
 

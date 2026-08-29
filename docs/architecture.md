@@ -7,7 +7,7 @@ IOS Risk Data Foundry prepares finance/risk domain data for reproducible evaluat
 ## High-level flow
 
 ```text
-Public transaction data      SEC EDGAR text       Synthetic risk scenarios
+Public transaction data      eCFR BSA text        Synthetic risk and AML cases
           │                       │                         │
           └───────────────┬───────┴───────────────┬─────────┘
                           │                       │
@@ -28,17 +28,24 @@ Public transaction data      SEC EDGAR text       Synthetic risk scenarios
 
 ### `foundry/pipeline.py`
 
-The config-driven entry point for enabled sources. It keeps SEC network access opt-in,
-loads the raw transaction dataset only when required, invokes each enabled source processor,
-and passes only those source outputs to the deterministic merger.
+The config-driven entry point for enabled sources. It loads transaction data only when
+required, invokes the official eCFR and synthetic sources, and passes only enabled outputs
+to deterministic assembly. EDGAR remains explicitly disabled because its legacy answers
+were not grounded in the retrieved filing text.
 
 ### `foundry/features/`
 
 Domain feature engineering for transaction data. This layer is intentionally deterministic so the same input produces the same transformed representation.
 
-### `foundry/sources/sec_edgar.py`
+### `foundry/sources/bsa_regulations.py`
 
-Utilities for acquiring and chunking public SEC filing text for finance/risk language tasks.
+Fetches or reuses cached official 31 CFR Chapter X XML. Answers are regulatory text with
+citations; complete CFR sections are assigned wholly to train or evaluation.
+
+### `foundry/sources/aml_typologies.py`
+
+Produces account-level AML cases and documented benign counterexamples. Observable evidence
+is rendered in the input; typology, tier, and action remain in the answer.
 
 ### `foundry/sources/synthetic.py` and `synthetic_generator.py`
 
@@ -58,7 +65,13 @@ Produces fingerprints and version metadata for generated artifacts.
 
 ### `foundry/uploader.py`
 
-Publishes prepared artifacts to the configured Hugging Face dataset repository.
+Normalizes the public schema and publishes the exact export, dataset card, and manifest to
+the configured Hugging Face dataset repository. It refuses unauthenticated publication.
+
+### `scripts/build_finetune_v3.py` and `validate_finetune_v3.py`
+
+Assemble the deterministic Project 03 export, create source-level holdouts, and fail closed
+on malformed rows, duplicate prompts, unsupported model-score claims, or manifest drift.
 
 ### `scripts/validate_features.py`
 
@@ -84,13 +97,7 @@ The architecture is designed for experimentation and reproducible evidence. Depl
 
 ## Multi-source orchestration boundary
 
-The repository now has a small orchestration layer for the tabular, SEC, and statistical
-synthetic paths. Each source is enabled independently in `configs/pipeline_config.yaml`.
-The default remains tabular-only so a normal run does not unexpectedly make network requests
-or mix synthetic examples into an export. The merger receives the enabled source names, which
-prevents stale output from a disabled source from leaking into a new dataset.
-
-The rule-based `synthetic_generator.py` scenario factory remains an explicit standalone artifact.
-It emits explanatory scenarios rather than the same statistical source contract, so forcing it
-into the main pipeline would obscure that evidence boundary. A future extension can add it as a
-fourth named source once its distinct provenance is represented in each output record.
+Each source is enabled independently in `configs/pipeline_config.yaml`. Source provenance is
+preserved on every v3 record. The final v3 assembly is deliberately separate from the legacy
+merger because it also creates tabular source-record and regulatory section holdouts. A stale
+output from a disabled source cannot be silently included.

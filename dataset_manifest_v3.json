@@ -1,0 +1,21 @@
+{
+  "version": "foundry-v3.0",
+  "dataset": "ios-risk-finetune-v3",
+  "records": 20606,
+  "sha256": "485f02df11b2e1dd4b1dbe0bb4dd9a68615735bbcf64cc7fbbb08933008ca075",
+  "seed": 42,
+  "unique_instruction_input": 20606,
+  "unique_outputs": 10025,
+  "composition": {
+    "aml_typology_distilled": 2462,
+    "aml_typology_template": 3538,
+    "ecfr_bsa_train": 364,
+    "fraud_scenario_v3": 5000,
+    "ulb_tabular_train": 9242
+  },
+  "regulatory_holdout_records": 104,
+  "regulatory_holdout_citations": 26,
+  "tabular_holdout_records": 27920,
+  "tabular_holdout_sha256": "1859820c31ff30b7c3af0d0065916cdc8a3b25f0a5925752ec30c3770f69b6a4",
+  "claim_boundary": "Synthetic/public-data research artifact; not production evidence."
+}

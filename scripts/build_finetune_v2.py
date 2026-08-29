@@ -64,8 +64,7 @@ def load_v1_tabular() -> list[dict]:
     print(f"Loading {V1_DATASET} from HuggingFace...")
     ds = load_dataset(V1_DATASET, split="train")
     rows = [
-        {"instruction": r["instruction"], "input": r["input"], "output": r["output"]}
-        for r in ds
+        {"instruction": r["instruction"], "input": r["input"], "output": r["output"]} for r in ds
     ]
     print(f"  {len(rows):,} tabular rows")
     return rows
@@ -102,8 +101,11 @@ def summarise(pairs: list[dict]) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build the ios-risk-finetune-v2 dataset")
     ap.add_argument("--out", default="data/exports/ios_risk_finetune_v2.jsonl")
-    ap.add_argument("--scenarios-only", action="store_true",
-                    help="Skip the tabular path (no network / no v1 download)")
+    ap.add_argument(
+        "--scenarios-only",
+        action="store_true",
+        help="Skip the tabular path (no network / no v1 download)",
+    )
     args = ap.parse_args()
 
     rng = random.Random(SEED)

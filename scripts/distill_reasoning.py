@@ -48,15 +48,16 @@ COST
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
-import random
 import re
 import sys
 import time
 from pathlib import Path
 from typing import Any
+
 
 class FatalProviderError(RuntimeError):
     """Provider error that will not improve on retry — abort the run."""
@@ -97,13 +98,16 @@ def build_messages(record: dict[str, Any]) -> list[dict[str, str]]:
     typology = record.get("typology", "unknown")
     return [
         {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": USER_TEMPLATE.format(
-            tier=tier,
-            typology=typology,
-            typology_display=typology.upper().replace("_", " "),
-            features=record["input"],
-            draft=record["output"],
-        )},
+        {
+            "role": "user",
+            "content": USER_TEMPLATE.format(
+                tier=tier,
+                typology=typology,
+                typology_display=typology.upper().replace("_", " "),
+                features=record["input"],
+                draft=record["output"],
+            ),
+        },
     ]
 
 
@@ -129,36 +133,6 @@ def numbers_in(text: str) -> set[str]:
     return set(re.findall(r"\d+(?:\.\d+)?", text.replace(",", "")))
 
 
-def derivable(source: set[str]) -> set[str]:
-    """
-    Values an analyst could correctly compute from the source figures.
-
-    "$27,600 of cash against $18,000 declared income" legitimately supports
-    "153% of stated annual income". That is arithmetic, not invention, and
-    rejecting it discards exactly the reasoning the rewrite is meant to add.
-    Ratios and multiples of every ordered pair are allowed, rounded the way a
-    person would write them.
-    """
-    vals = []
-    for x in source:
-        try:
-            vals.append(float(x))
-        except ValueError:
-            continue
-
-    out: set[str] = set()
-    for a in vals:
-        for b in vals:
-            if b == 0:
-                continue
-            for v in (a / b * 100, a / b):
-                if not (0 < v < 1e7):
-                    continue
-                out.add(str(int(round(v))))
-                out.add(f"{v:.1f}")
-    return out
-
-
 def validate(original: dict[str, Any], rewritten: str) -> tuple[bool, str]:
     """
     Reject rewrites that drift. Cheaper to discard and keep the template than
@@ -178,8 +152,7 @@ def validate(original: dict[str, Any], rewritten: str) -> tuple[bool, str]:
 
     # Every figure in the rewrite must have existed in the source material.
     source = numbers_in(original["input"]) | numbers_in(original["output"])
-    allowed = source | derivable(source)
-    invented = numbers_in(rewritten) - allowed
+    invented = numbers_in(rewritten) - source
     if invented:
         return False, f"invented figures: {sorted(invented)[:5]}"
 
@@ -192,7 +165,7 @@ def validate(original: dict[str, Any], rewritten: str) -> tuple[bool, str]:
 
 def record_key(rec: dict[str, Any]) -> str:
     """Stable identity for a source record, for resume and dedup."""
-    raw = f"{rec.get('instruction','')}\x00{rec.get('input','')}"
+    raw = f"{rec.get('instruction', '')}\x00{rec.get('input', '')}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -222,17 +195,20 @@ def describe(exc: Exception) -> str:
             parts.append(f"  {attr}: {val}")
     body = getattr(exc, "response", None)
     if body is not None:
-        try:
+        with contextlib.suppress(Exception):
             parts.append(f"  body: {body.text[:600]}")
-        except Exception:  # noqa: BLE001
-            pass
     return "\n".join(parts)
 
 
-def call_model(client: Any, model: str, messages: list[dict[str, str]],
-               limiter: RateLimiter,
-               extra_body: dict[str, Any] | None = None,
-               max_tokens: int = 700, retries: int = 6) -> str | None:
+def call_model(
+    client: Any,
+    model: str,
+    messages: list[dict[str, str]],
+    limiter: RateLimiter,
+    extra_body: dict[str, Any] | None = None,
+    max_tokens: int = 700,
+    retries: int = 6,
+) -> str | None:
     """
     One rewrite. Returns None when the provider produced nothing usable.
 
@@ -242,7 +218,10 @@ def call_model(client: Any, model: str, messages: list[dict[str, str]],
     reported rather than a guess at what it meant.
     """
     kwargs: dict[str, Any] = dict(
-        model=model, messages=messages, temperature=0.9, max_tokens=max_tokens,
+        model=model,
+        messages=messages,
+        temperature=0.9,
+        max_tokens=max_tokens,
     )
     if extra_body:
         kwargs["extra_body"] = extra_body
@@ -259,7 +238,7 @@ def call_model(client: Any, model: str, messages: list[dict[str, str]],
             kind = type(exc).__name__
             if kind in fatal:
                 raise FatalProviderError(describe(exc)) from exc
-            wait = min(2 ** attempt, 60)
+            wait = min(2**attempt, 60)
             print(f"    {kind}, retry {attempt + 1}/{retries} in {wait}s", flush=True)
             time.sleep(wait)
     return None
@@ -274,12 +253,15 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0, help="0 = all records")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max-tokens", type=int, default=700)
-    ap.add_argument("--rpm", type=int, default=35,
-                    help="request ceiling; account is advertised at 40")
-    ap.add_argument("--attempts", type=int, default=2,
-                    help="tries per record before keeping the template")
-    ap.add_argument("--no-resume", action="store_true",
-                    help="ignore existing output and start over")
+    ap.add_argument(
+        "--rpm", type=int, default=35, help="request ceiling; account is advertised at 40"
+    )
+    ap.add_argument(
+        "--attempts", type=int, default=2, help="tries per record before keeping the template"
+    )
+    ap.add_argument(
+        "--no-resume", action="store_true", help="ignore existing output and start over"
+    )
     ap.add_argument(
         "--extra-body",
         default='{"chat_template_kwargs": {"enable_thinking": false}}',
@@ -308,8 +290,11 @@ def main() -> int:
     limiter = RateLimiter(args.rpm)
 
     records = [json.loads(x) for x in Path(args.inp).read_text().splitlines() if x.strip()]
+    unique_records: dict[str, dict[str, Any]] = {}
+    for record in records:
+        unique_records.setdefault(record_key(record), record)
+    records = list(unique_records.values())
     if args.limit:
-        random.Random(args.seed).shuffle(records)
         records = records[: args.limit]
 
     # Resume: every completed record is already a line in the output. Re-reading
@@ -318,6 +303,7 @@ def main() -> int:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     done: dict[str, bool] = {}
+    seen_outputs: set[str] = set()
     if out_path.exists() and not args.no_resume:
         for line in out_path.read_text().splitlines():
             if not line.strip():
@@ -325,8 +311,13 @@ def main() -> int:
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
-                continue          # torn final line from a hard kill; it gets redone
-            done[record_key(row)] = bool(row.get("distilled"))
+                continue  # torn final line from a hard kill; it gets redone
+            key = record_key(row)
+            if key in done:
+                continue
+            done[key] = bool(row.get("distilled"))
+            if row.get("distilled") and row.get("output"):
+                seen_outputs.add(strip_meta(row["output"]))
 
     todo = [r for r in records if record_key(r) not in done]
     total = len(records)
@@ -342,8 +333,6 @@ def main() -> int:
 
     rejected = failed = 0
     reasons: dict[str, int] = {}
-    seen_outputs: set[str] = set()
-
     # Append, and flush every line. A kill at any moment loses at most one record.
     with out_path.open("a", encoding="utf-8") as f:
         for i, rec in enumerate(todo, 1):
@@ -351,13 +340,22 @@ def main() -> int:
             why = ""
             for _ in range(max(args.attempts, 1)):
                 try:
-                    cand = call_model(client, args.model, build_messages(rec), limiter,
-                                      extra_body=extra_body, max_tokens=args.max_tokens)
+                    cand = call_model(
+                        client,
+                        args.model,
+                        build_messages(rec),
+                        limiter,
+                        extra_body=extra_body,
+                        max_tokens=args.max_tokens,
+                    )
                 except FatalProviderError as exc:
                     f.flush()
-                    print(f"\nSTOPPED at {reused + i - 1:,}/{total:,}. "
-                          f"Progress is saved in {out_path}.\n\n"
-                          f"The provider's exact response:\n{exc}", file=sys.stderr)
+                    print(
+                        f"\nSTOPPED at {reused + i - 1:,}/{total:,}. "
+                        f"Progress is saved in {out_path}.\n\n"
+                        f"The provider's exact response:\n{exc}",
+                        file=sys.stderr,
+                    )
                     return 1
                 if cand is None:
                     continue
@@ -372,27 +370,34 @@ def main() -> int:
                     reasons[why.split(":")[0]] = reasons.get(why.split(":")[0], 0) + 1
                 else:
                     failed += 1
-                out = rec["output"]            # keep the template; never drop a record
+                out = rec["output"]  # keep the template; never drop a record
             else:
                 kept += 1
                 seen_outputs.add(text)
                 out = text
 
-            f.write(json.dumps({
-                "instruction": rec["instruction"],
-                "input": rec["input"],
-                "output": out,
-                "typology": rec.get("typology"),
-                "risk_tier": rec.get("risk_tier"),
-                "distilled": out != rec["output"],
-            }) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "instruction": rec["instruction"],
+                        "input": rec["input"],
+                        "output": out,
+                        "typology": rec.get("typology"),
+                        "risk_tier": rec.get("risk_tier"),
+                        "distilled": out != rec["output"],
+                    }
+                )
+                + "\n"
+            )
             f.flush()
 
             if i % 50 == 0 or i == len(todo):
                 pct = 100 * (reused + i) / total
-                print(f"  {reused + i:,} / {total:,} pairs ({pct:.1f}%)  "
-                      f"distilled={kept:,} rejected={rejected:,} failed={failed:,}",
-                      flush=True)
+                print(
+                    f"  {reused + i:,} / {total:,} pairs ({pct:.1f}%)  "
+                    f"distilled={kept:,} rejected={rejected:,} failed={failed:,}",
+                    flush=True,
+                )
 
     print("\n\u2713 Complete")
     print(f"  pairs on disk : {reused + len(todo):,} / {total:,}")

@@ -18,12 +18,15 @@ This repository is part of a public engineering portfolio. Claims are separated 
 |---|---|---|
 | Feature engineering | Implemented + tested | `foundry/features/` and `tests/test_features.py` |
 | Instruction formatting | Implemented + tested | `foundry/formatters.py` and formatter tests |
-| SEC text preparation | Implemented + tested offline | URL parsing, HTML extraction, chunking, and export tests use mocked responses |
+| eCFR regulatory preparation | Implemented + tested | Cached official XML parsing, cited answers, and whole-section holdout |
+| AML distillation audit | Implemented + tested | 3,355 checkpoint rows preserved; 2,462 strict-valid rewrites included |
 | Synthetic scenario generation | Implemented + tested | Explicit seeds, deterministic output, class/count validation |
 | Dataset merge/versioning | Implemented + tested | Deterministic deduplication, JSONL validation, SHA256 tests, manifest |
-| Multi-source orchestration | Implemented + tested | Enabled-source integration test; SEC remains opt-in |
+| Multi-source orchestration | Implemented + tested | Tabular, scenario, AML, and eCFR paths with explicit provenance |
 | Feature uplift | Benchmarked | Reproduced run documented in `docs/benchmark-reproduction.md` |
-| Hugging Face dataset | Published artifact | `Etherlabs/ios-risk-finetune-v1` |
+| Hugging Face v1 dataset | Published legacy artifact | Retained for lineage; unsuitable as Project 03 reasoning data |
+| v3 dataset | Locally validated; publication pending | 20,606 unique pairs; exact manifest `dataset_manifest_v3.json` |
+| Project 03 model improvement | Not yet evidenced | Requires base-versus-tuned run on the frozen v3 evaluation set |
 | Client financial impact | Not claimed | No verified production client outcome in this repo |
 
 ## Benchmark interpretation

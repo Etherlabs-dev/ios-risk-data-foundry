@@ -18,7 +18,9 @@ from pathlib import Path
 import numpy as np
 
 
-def format_feature_line(amount: float, hour: int, txn_count: int) -> str:
+def format_feature_line(
+    amount: float, hour: int, txn_count: int, extra_features: dict[str, object] | None = None
+) -> str:
     """
     Render the observable features of a transaction as the model's input.
 
@@ -31,7 +33,7 @@ def format_feature_line(amount: float, hour: int, txn_count: int) -> str:
     is_large = int(amount > 500.00)
     is_off_hours = int(hour < 6 or hour >= 22)
     is_round = int(amount >= 10 and float(amount).is_integer() and amount % 10 == 0)
-    return (
+    base = (
         f"Amount: ${amount:.2f} | "
         f"Hour: {hour} | "
         f"TxnCount1h: {txn_count} | "
@@ -40,6 +42,9 @@ def format_feature_line(amount: float, hour: int, txn_count: int) -> str:
         f"LargeTxn: {is_large} | "
         f"RoundAmt: {is_round}"
     )
+    if extra_features:
+        base += " | " + " | ".join(f"{key}: {value}" for key, value in extra_features.items())
+    return base
 
 
 class FraudScenarioFactory:
@@ -117,11 +122,11 @@ class FraudScenarioFactory:
 
         explanation = (
             f"CRITICAL RISK — ACCOUNT TAKEOVER DETECTED. "
-            f"Large transaction of ${amount:,.2f} at {hour:02d}:00 is inconsistent "
-            f"with normal account behaviour. Off-hours timing combined with "
-            f"unusually high amount suggests compromised credentials. "
-            f"Fraudsters target sleeping victims to maximise time before detection. "
-            f"Immediate account freeze recommended."
+            f"Large transaction of ${amount:,.2f} at {hour:02d}:00 follows a new-device "
+            f"login from a new country and 3 failed authentication attempts. The "
+            f"combination of credential anomalies and high-value off-hours activity "
+            f"supports account takeover. Recommended action: step-up authentication "
+            f"and restrict the transaction pending customer verification."
         )
 
         return {
@@ -132,6 +137,12 @@ class FraudScenarioFactory:
             "fraud_type": "account_takeover",
             "risk_level": "CRITICAL",
             "txn_count_1h": txn_count,
+            "extra_features": {
+                "NewDevice": 1,
+                "NewCountry": 1,
+                "FailedAuth24h": 3,
+                "CustomerVerified": 0,
+            },
             "risk_explanation": explanation,
         }
 
@@ -158,9 +169,9 @@ class FraudScenarioFactory:
             f"HIGH RISK — MONEY MULE / STRUCTURING DETECTED. "
             f"Round-number amount of ${amount:,.0f} is consistent with structuring "
             f"transactions to stay below the $10,000 Bank Secrecy Act reporting "
-            f"threshold. {txn_count} transactions of similar size suggest deliberate "
-            f"layering to obscure the origin of funds. "
-            f"AML review and SAR filing may be required."
+            f"threshold. {txn_count} related round-number transactions and multiple "
+            f"beneficiaries indicate possible layering. "
+            f"Escalate for AML review and assess whether SAR filing is required."
         )
 
         return {
@@ -171,6 +182,12 @@ class FraudScenarioFactory:
             "fraud_type": "money_mule",
             "risk_level": "HIGH",
             "txn_count_1h": txn_count,
+            "extra_features": {
+                "RelatedRoundTxnCount24h": txn_count,
+                "Beneficiaries24h": int(self.rng.integers(2, 6)),
+                "DocumentedPurpose": 0,
+                "CTRThreshold": "$10,000",
+            },
             "risk_explanation": explanation,
         }
 
@@ -194,7 +211,8 @@ class FraudScenarioFactory:
             f"CRITICAL RISK — BUST-OUT FRAUD DETECTED. "
             f"Burst of {txn_count} large transactions averaging ${amount:,.2f} "
             f"is the hallmark of bust-out fraud. Account history shows normal "
-            f"behaviour followed by sudden maxing of credit lines. "
+            f"repayment for 18 months followed by credit utilisation rising from 12% "
+            f"to 98% in 24 hours. "
             f"Total exposure in this burst: ${txn_count * amount:,.2f}. "
             f"Account should be frozen immediately and referred to fraud investigations."
         )
@@ -207,6 +225,14 @@ class FraudScenarioFactory:
             "fraud_type": "bust_out",
             "risk_level": "CRITICAL",
             "txn_count_1h": txn_count,
+            "extra_features": {
+                "AccountHistoryMonths": 18,
+                "PriorPaymentPattern": "on_time",
+                "CreditUtilizationBeforePct": 12,
+                "CreditUtilizationAfterPct": 98,
+                "UtilizationWindowHours": 24,
+                "BurstTotalExposure": f"${txn_count * amount:,.2f}",
+            },
             "risk_explanation": explanation,
         }
 
@@ -236,6 +262,14 @@ def build_synthetic_dataset(
     }
 
     all_pairs = []
+    seen_inputs: set[str] = set()
+
+    def append_unique(pair: dict) -> bool:
+        if pair["input"] in seen_inputs:
+            return False
+        seen_inputs.add(pair["input"])
+        all_pairs.append(pair)
+        return True
 
     # Generate fraud scenarios — equal split across all 4 types
     print(f"Generating {n_fraud:,} fraud scenarios ({per_type} per type)...")
@@ -243,7 +277,12 @@ def build_synthetic_dataset(
     for index, (fraud_type, generator) in enumerate(generators.items()):
         count = per_type + (1 if index < remainder else 0)
         generated_by_type[fraud_type] = count
-        for _ in range(count):
+        accepted = 0
+        attempts = 0
+        while accepted < count:
+            attempts += 1
+            if attempts > count * 50:
+                raise RuntimeError(f"Could not generate {count} unique {fraud_type} scenarios")
             record = generator()
             pair = {
                 "instruction": (
@@ -254,15 +293,21 @@ def build_synthetic_dataset(
                     amount=record["Amount"],
                     hour=int(record["Time"]) // 3600 % 24,
                     txn_count=record["txn_count_1h"],
+                    extra_features=record.get("extra_features"),
                 ),
                 "output": record["risk_explanation"],
             }
-            all_pairs.append(pair)
+            accepted += int(append_unique(pair))
 
     # Generate legitimate transactions
     print(f"Generating {n_legit:,} legitimate transactions...")
     rng = np.random.default_rng(seed=seed + 1)
-    for _ in range(n_legit):
+    accepted_legit = 0
+    attempts = 0
+    while accepted_legit < n_legit:
+        attempts += 1
+        if attempts > n_legit * 50:
+            raise RuntimeError(f"Could not generate {n_legit} unique legitimate scenarios")
         amount = round(float(rng.lognormal(mean=3.5, sigma=1.2)), 2)
         hour = int(rng.integers(0, 23))
         txn_count = int(rng.integers(1, 5))
@@ -271,9 +316,7 @@ def build_synthetic_dataset(
                 "You are IOS Risk, an AI system for financial risk assessment. "
                 "Analyse the following transaction and assess its fraud risk."
             ),
-            "input": format_feature_line(
-                amount=amount, hour=hour, txn_count=txn_count
-            ),
+            "input": format_feature_line(amount=amount, hour=hour, txn_count=txn_count),
             "output": (
                 f"LOW RISK — LEGITIMATE TRANSACTION. "
                 f"Amount of ${amount:.2f} with {txn_count} transactions in the past hour "
@@ -281,7 +324,7 @@ def build_synthetic_dataset(
                 f"No anomalous velocity, amount, or timing signals detected."
             ),
         }
-        all_pairs.append(pair)
+        accepted_legit += int(append_unique(pair))
 
     # Shuffle and export
     random.Random(seed).shuffle(all_pairs)
