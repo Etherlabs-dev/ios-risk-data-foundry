@@ -14,7 +14,7 @@ instruction data for Project 03 model adaptation.
 |---|---|
 | Feature benchmark | AP `0.8510 → 0.8588`; recall `0.7857 → 0.8367` |
 | Legacy dataset | `Etherlabs/ios-risk-finetune-v1`; retained for lineage, unsuitable for Project 03 reasoning |
-| Current dataset | `Etherlabs/ios-risk-finetune-v3`; 20,606 quality-gated pairs |
+| Current dataset | [`Etherlabs/ios-risk-finetune-v3`](https://huggingface.co/datasets/Etherlabs/ios-risk-finetune-v3); 20,606 quality-gated pairs, published and independently re-downloaded |
 | v3 fingerprint | `485f02df11b2e1dd4b1dbe0bb4dd9a68615735bbcf64cc7fbbb08933008ca075` |
 | Automated checks | Ruff, pytest, manifest/hash verification, duplication and unsupported-claim gates |
 

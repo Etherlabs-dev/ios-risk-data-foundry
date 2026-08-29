@@ -25,7 +25,7 @@ This repository is part of a public engineering portfolio. Claims are separated 
 | Multi-source orchestration | Implemented + tested | Tabular, scenario, AML, and eCFR paths with explicit provenance |
 | Feature uplift | Benchmarked | Reproduced run documented in `docs/benchmark-reproduction.md` |
 | Hugging Face v1 dataset | Published legacy artifact | Retained for lineage; unsuitable as Project 03 reasoning data |
-| v3 dataset | Locally validated; publication pending | 20,606 unique pairs; exact manifest `dataset_manifest_v3.json` |
+| v3 dataset | Published artifact + independently verified | 20,606 unique pairs; public repository `Etherlabs/ios-risk-finetune-v3`; downloaded SHA-256 matches `dataset_manifest_v3.json` |
 | Project 03 model improvement | Not yet evidenced | Requires base-versus-tuned run on the frozen v3 evaluation set |
 | Client financial impact | Not claimed | No verified production client outcome in this repo |
 
