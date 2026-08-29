@@ -48,6 +48,7 @@ COST
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -189,53 +190,77 @@ def validate(original: dict[str, Any], rewritten: str) -> tuple[bool, str]:
     return True, "ok"
 
 
-def call_model(client: Any, model: str, messages: list[dict[str, str]],
-               extra_body: dict[str, Any] | None = None,
-               max_tokens: int = 700, retries: int = 4) -> str | None:
-    """
-    One rewrite. Returns None if the provider never produced usable content.
+def record_key(rec: dict[str, Any]) -> str:
+    """Stable identity for a source record, for resume and dedup."""
+    raw = f"{rec.get('instruction','')}\x00{rec.get('input','')}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
-    Reasoning models (NVIDIA Nemotron, and others) return their chain of thought
-    in `reasoning_content` and the answer in `content`. With thinking enabled the
-    reasoning can consume the whole token budget, leaving `content` empty or None
-    — so thinking is disabled by default via --extra-body, and a None content is
-    treated as a failure rather than crashing on .strip().
+
+class RateLimiter:
+    """
+    Keep request starts at or below `rpm`. The account is advertised at 40 rpm;
+    the default sits under it so a burst never trips a 429 in the first place.
+    """
+
+    def __init__(self, rpm: int) -> None:
+        self.interval = 60.0 / max(rpm, 1)
+        self._last = 0.0
+
+    def wait(self) -> None:
+        delta = time.monotonic() - self._last
+        if delta < self.interval:
+            time.sleep(self.interval - delta)
+        self._last = time.monotonic()
+
+
+def describe(exc: Exception) -> str:
+    """The provider's own words, not our interpretation of them."""
+    parts = [f"{type(exc).__name__}: {exc}"]
+    for attr in ("status_code", "code", "message"):
+        val = getattr(exc, attr, None)
+        if val is not None:
+            parts.append(f"  {attr}: {val}")
+    body = getattr(exc, "response", None)
+    if body is not None:
+        try:
+            parts.append(f"  body: {body.text[:600]}")
+        except Exception:  # noqa: BLE001
+            pass
+    return "\n".join(parts)
+
+
+def call_model(client: Any, model: str, messages: list[dict[str, str]],
+               limiter: RateLimiter,
+               extra_body: dict[str, Any] | None = None,
+               max_tokens: int = 700, retries: int = 6) -> str | None:
+    """
+    One rewrite. Returns None when the provider produced nothing usable.
+
+    Transient failures — 429, timeouts, 5xx — back off and retry; they are the
+    expected cost of a long run and must never end the job. Only a rejected key
+    or an unknown model aborts, and then the provider's exact response is
+    reported rather than a guess at what it meant.
     """
     kwargs: dict[str, Any] = dict(
-        model=model, messages=messages,
-        temperature=0.9,       # high: variety is the entire point
-        max_tokens=max_tokens,
+        model=model, messages=messages, temperature=0.9, max_tokens=max_tokens,
     )
     if extra_body:
         kwargs["extra_body"] = extra_body
 
-    # A wrong model id or a bad key is not transient. Retrying it 4 times per
-    # record and then walking the whole file wastes minutes to rediscover a
-    # config error on every single row, so those abort the run immediately.
-    fatal = ("NotFoundError", "AuthenticationError", "PermissionDeniedError")
+    fatal = ("AuthenticationError", "PermissionDeniedError", "NotFoundError")
 
     for attempt in range(retries):
+        limiter.wait()
         try:
             resp = client.chat.completions.create(**kwargs)
             content = resp.choices[0].message.content
-            if not content or not content.strip():
-                print("    empty content (model may have spent the budget thinking)")
-                return None
-            return content.strip()
+            return content.strip() if content and content.strip() else None
         except Exception as exc:  # noqa: BLE001 - provider errors vary widely
             kind = type(exc).__name__
             if kind in fatal:
-                raise FatalProviderError(
-                    f"{kind}: {exc}\n\n"
-                    f"  model    : {model}\n"
-                    f"  base_url : {getattr(client, 'base_url', '?')}\n\n"
-                    "A 404 means the endpoint does not recognise that model id for\n"
-                    "this key; 401/403 means the key is rejected. Neither improves\n"
-                    "by retrying. List what the key can actually reach:\n\n"
-                    "  curl -s <base_url>/models -H \"Authorization: Bearer $DISTILL_API_KEY\""
-                ) from exc
-            wait = 2 ** attempt
-            print(f"    retry {attempt + 1}/{retries} after {kind} ({wait}s)")
+                raise FatalProviderError(describe(exc)) from exc
+            wait = min(2 ** attempt, 60)
+            print(f"    {kind}, retry {attempt + 1}/{retries} in {wait}s", flush=True)
             time.sleep(wait)
     return None
 
@@ -245,19 +270,20 @@ def main() -> int:
     ap.add_argument("--in", dest="inp", required=True)
     ap.add_argument("--out", dest="out", required=True)
     ap.add_argument("--base-url", required=True)
-    ap.add_argument("--model", default="Qwen/Qwen2.5-72B-Instruct")
+    ap.add_argument("--model", default="nvidia/nemotron-3-super-120b-a12b")
     ap.add_argument("--limit", type=int, default=0, help="0 = all records")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max-tokens", type=int, default=700)
+    ap.add_argument("--rpm", type=int, default=35,
+                    help="request ceiling; account is advertised at 40")
+    ap.add_argument("--attempts", type=int, default=2,
+                    help="tries per record before keeping the template")
+    ap.add_argument("--no-resume", action="store_true",
+                    help="ignore existing output and start over")
     ap.add_argument(
         "--extra-body",
         default='{"chat_template_kwargs": {"enable_thinking": false}}',
-        help=(
-            "JSON passed through as extra_body. The default disables reasoning, "
-            "which is what NVIDIA Nemotron needs: this is constrained rewriting, "
-            "not a problem to think about, and thinking tokens crowd out the "
-            "answer. Pass '{}' for providers that reject the field."
-        ),
+        help="JSON passed through as extra_body; default disables reasoning",
     )
     args = ap.parse_args()
 
@@ -272,45 +298,86 @@ def main() -> int:
         print("pip install openai", file=sys.stderr)
         return 1
 
-    client = OpenAI(api_key=api_key, base_url=args.base_url)
-
     try:
         extra_body = json.loads(args.extra_body) or None
     except json.JSONDecodeError as exc:
         print(f"--extra-body is not valid JSON: {exc}", file=sys.stderr)
         return 1
 
+    client = OpenAI(api_key=api_key, base_url=args.base_url)
+    limiter = RateLimiter(args.rpm)
+
     records = [json.loads(x) for x in Path(args.inp).read_text().splitlines() if x.strip()]
     if args.limit:
         random.Random(args.seed).shuffle(records)
         records = records[: args.limit]
-    print(f"Distilling {len(records):,} records via {args.model}")
 
+    # Resume: every completed record is already a line in the output. Re-reading
+    # it is the whole recovery mechanism — a long run will be interrupted, and
+    # re-paying for work already done is the one unrecoverable cost here.
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    kept = rejected = failed = 0
-    reasons: dict[str, int] = {}
-
-    with out_path.open("w", encoding="utf-8") as f:
-        for i, rec in enumerate(records, 1):
+    done: dict[str, bool] = {}
+    if out_path.exists() and not args.no_resume:
+        for line in out_path.read_text().splitlines():
+            if not line.strip():
+                continue
             try:
-                text = call_model(client, args.model, build_messages(rec),
-                                  extra_body=extra_body, max_tokens=args.max_tokens)
-            except FatalProviderError as exc:
-                print(f"\nAborting on record {i}: {exc}", file=sys.stderr)
-                return 1
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue          # torn final line from a hard kill; it gets redone
+            done[record_key(row)] = bool(row.get("distilled"))
+
+    todo = [r for r in records if record_key(r) not in done]
+    total = len(records)
+    kept = sum(1 for v in done.values() if v)
+    reused = len(done)
+
+    print(f"Model     : {args.model}")
+    print(f"Target    : {total:,} pairs")
+    print(f"Resuming  : {reused:,} already on disk ({kept:,} distilled)")
+    print(f"Remaining : {len(todo):,}   at <= {args.rpm} rpm")
+    if todo:
+        print(f"Estimated : {len(todo) / args.rpm / 60:.1f} h\n", flush=True)
+
+    rejected = failed = 0
+    reasons: dict[str, int] = {}
+    seen_outputs: set[str] = set()
+
+    # Append, and flush every line. A kill at any moment loses at most one record.
+    with out_path.open("a", encoding="utf-8") as f:
+        for i, rec in enumerate(todo, 1):
+            text = None
+            why = ""
+            for _ in range(max(args.attempts, 1)):
+                try:
+                    cand = call_model(client, args.model, build_messages(rec), limiter,
+                                      extra_body=extra_body, max_tokens=args.max_tokens)
+                except FatalProviderError as exc:
+                    f.flush()
+                    print(f"\nSTOPPED at {reused + i - 1:,}/{total:,}. "
+                          f"Progress is saved in {out_path}.\n\n"
+                          f"The provider's exact response:\n{exc}", file=sys.stderr)
+                    return 1
+                if cand is None:
+                    continue
+                ok, why = validate(rec, cand)
+                if ok and strip_meta(cand) not in seen_outputs:
+                    text = strip_meta(cand)
+                    break
+
             if text is None:
-                failed += 1
-                out = rec["output"]           # provider gave up: keep the template
-            else:
-                ok, reason = validate(rec, text)
-                if ok:
-                    kept += 1
-                    out = text
-                else:
+                if why:
                     rejected += 1
-                    reasons[reason.split(":")[0]] = reasons.get(reason.split(":")[0], 0) + 1
-                    out = rec["output"]       # drifted: keep the template
+                    reasons[why.split(":")[0]] = reasons.get(why.split(":")[0], 0) + 1
+                else:
+                    failed += 1
+                out = rec["output"]            # keep the template; never drop a record
+            else:
+                kept += 1
+                seen_outputs.add(text)
+                out = text
+
             f.write(json.dumps({
                 "instruction": rec["instruction"],
                 "input": rec["input"],
@@ -319,18 +386,19 @@ def main() -> int:
                 "risk_tier": rec.get("risk_tier"),
                 "distilled": out != rec["output"],
             }) + "\n")
+            f.flush()
 
-            if i % 50 == 0:
-                print(f"  {i}/{len(records)}  kept={kept} rejected={rejected} failed={failed}")
+            if i % 50 == 0 or i == len(todo):
+                pct = 100 * (reused + i) / total
+                print(f"  {reused + i:,} / {total:,} pairs ({pct:.1f}%)  "
+                      f"distilled={kept:,} rejected={rejected:,} failed={failed:,}",
+                      flush=True)
 
-    total = kept + rejected + failed
-    print("\n✓ Distillation complete")
-    print(f"  distilled : {kept:,} ({100 * kept / max(total, 1):.1f}%)")
-    print(f"  rejected  : {rejected:,}  {reasons}")
-    print(f"  api failed: {failed:,}")
-    print(f"  output    : {out_path}")
-    print("\nRejected and failed records keep their template text, so the file is")
-    print("always complete. Inspect a sample before training on it.")
+    print("\n\u2713 Complete")
+    print(f"  pairs on disk : {reused + len(todo):,} / {total:,}")
+    print(f"  distilled     : {kept:,}")
+    print(f"  template kept : {rejected + failed:,}  {reasons}")
+    print(f"  output        : {out_path}")
     return 0
 
 
